@@ -132,8 +132,14 @@
     shell.brandBn = el("span", { class: "brand-bn", text: n.bn });
     shell.brandSub = el("span", { class: "brand-sub", text: n.college });
     var brand = el("a", { class: "brand", href: "index.html", "aria-label": "হোম পাতা" }, [
-      el("span", { class: "logo", "aria-hidden": "true", text: "প্রা" }),
-      el("span", { class: "brand-text" }, [shell.brandBn, shell.brandSub])
+      el("span", { class: "logo" }, el("img", { src: "img/logo-zoology-128.png", alt: n.bn, width: "43", height: "44", decoding: "async" })),
+      el("span", { class: "brand-text" }, [
+        shell.brandBn,
+        el("span", { class: "brand-college" }, [
+          el("img", { class: "college-mark", src: "img/logo-college.png", alt: "", width: "20", height: "20", decoding: "async" }),
+          shell.brandSub
+        ])
+      ])
     ]);
     var wrap = el("div", { class: "wrap header-row" }, [brand, menuBtn, nav]);
     clear(host).appendChild(wrap);
@@ -167,7 +173,14 @@
       return u ? el("li", null, el("a", { href: u, text: s[1], target: "_blank", rel: "noopener noreferrer" })) : null;
     });
     clear(host).appendChild(el("div", { class: "wrap footer-grid" }, [
-      el("div", null, [el("strong", { text: n.bn }), el("p", { class: "muted", text: n.college }), el("p", { class: "muted", text: n.en })]),
+      el("div", null, [
+        el("strong", { text: n.bn }),
+        el("p", { class: "muted footer-college" }, [
+          el("img", { class: "college-mark", src: "img/logo-college.png", alt: "", width: "26", height: "27", loading: "lazy", decoding: "async" }),
+          n.college
+        ]),
+        el("p", { class: "muted", text: n.en })
+      ]),
       contact.length ? el("ul", { class: "plain", "aria-label": "যোগাযোগ" }, contact) : null,
       el("ul", { class: "plain", "aria-label": "দরকারি লিংক" }, [
         el("li", null, el("a", { href: "form.html", text: "শিক্ষার্থীর তথ্য ফর্ম" })),

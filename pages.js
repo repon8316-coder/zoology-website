@@ -22,13 +22,16 @@
       load: function () { return S.rpc("web_site_home"); },
       render: function (d, main) {
         var n = S.names();
-        main.appendChild(el("section", { class: "hero" }, el("div", { class: "wrap" }, [
-          el("h1", { text: n.bn }),
-          el("p", { text: n.college }),
-          el("p", { text: "বিভাগের নোটিশ, শিক্ষক পরিচিতি, ছবি ও দরকারি ফাইল এক জায়গায়।" }),
-          el("div", { class: "btns" }, [
-            el("a", { class: "btn", href: "notices.html", text: "সর্বশেষ নোটিশ" }),
-            el("a", { class: "btn btn-outline", href: "form.html", text: "শিক্ষার্থীর তথ্য ফর্ম" })
+        main.appendChild(el("section", { class: "hero" }, el("div", { class: "wrap hero-row" }, [
+          el("span", { class: "hero-logo" }, el("img", { src: "img/logo-zoology.png", alt: n.bn, width: "150", height: "152", decoding: "async" })),
+          el("div", { class: "hero-text" }, [
+            el("h1", { text: n.bn }),
+            el("p", { text: n.college }),
+            el("p", { text: "বিভাগের নোটিশ, শিক্ষক পরিচিতি, ছবি ও দরকারি ফাইল এক জায়গায়।" }),
+            el("div", { class: "btns" }, [
+              el("a", { class: "btn", href: "notices.html", text: "সর্বশেষ নোটিশ" }),
+              el("a", { class: "btn btn-outline", href: "form.html", text: "শিক্ষার্থীর তথ্য ফর্ম" })
+            ])
           ])
         ])));
 

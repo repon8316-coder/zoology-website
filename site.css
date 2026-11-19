@@ -35,7 +35,18 @@ h3 { font-size: 1.1rem; }
 .site-header { background: var(--primary); color: var(--on-primary); position: sticky; top: 0; z-index: 50; box-shadow: var(--shadow); }
 .header-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding-top: 8px; padding-bottom: 8px; }
 .brand { display: flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; min-width: 0; }
-.logo { flex: none; width: 44px; height: 44px; border-radius: 50%; background: var(--on-primary); color: var(--primary); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; }
+.logo { flex: none; width: 48px; height: 48px; border-radius: 12px; background: #fff; display: inline-flex; align-items: center; justify-content: center; }
+.logo img { display: block; width: 43px; height: 44px; object-fit: contain; }
+.brand-college { display: inline-flex; align-items: center; gap: 5px; font-size: .8rem; opacity: .95; }
+.college-mark { flex: none; width: 20px; height: 20px; object-fit: contain; background: #fff; border-radius: 50%; padding: 1px; }
+.brand-college .brand-sub { opacity: 1; }
+.footer-college { display: flex; align-items: center; gap: 8px; }
+.footer-college .college-mark { width: 26px; height: 27px; }
+.hero-row { display: flex; align-items: center; gap: 24px; }
+.hero-logo { flex: none; width: 96px; height: 97px; background: #fff; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; padding: 6px; }
+.hero-logo img { width: 100%; height: auto; display: block; }
+@media (min-width: 720px) { .hero-logo { width: 150px; height: 152px; } }
+@media (max-width: 480px) { .hero-row { gap: 14px; } .hero-logo { width: 72px; height: 73px; padding: 4px; } .brand-bn { font-size: 1rem; } }
 .brand-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
 .brand-bn { font-weight: 700; font-size: 1.05rem; }
 .brand-sub { font-size: .8rem; opacity: .92; }

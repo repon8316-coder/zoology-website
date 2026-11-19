@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>শিক্ষার্থীর তথ্য ফর্ম — প্রাণিবিদ্যা বিভাগ</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="site">
+    <h1>প্রাণিবিদ্যা বিভাগ</h1>
+    <p>রংপুর সরকারি কলেজ, রংপুর</p>
+  </header>
+  <main>
+    <div id="result" role="status" aria-live="polite" tabindex="-1"></div>
+
+    <form id="f" class="card" novalidate autocomplete="off">
+      <h2>শিক্ষার্থীর তথ্য</h2>
+      <p class="privacy">আপনার তথ্য শুধু বিভাগের কাজে ব্যবহৃত হবে।  <span class="req" style="color:#c62828">*</span> চিহ্নিত ঘর অবশ্যই পূরণ করতে হবে।</p>
+
+      <label for="reg_no">রেজিস্ট্রেশন নং <span class="req">*</span></label>
+      <input id="reg_no" name="reg_no" inputmode="numeric" maxlength="20" aria-describedby="e_reg_no">
+      <div class="msg" id="e_reg_no"></div>
+
+      <label for="name_bn">নাম (বাংলা)</label>
+      <input id="name_bn" name="name_bn" maxlength="120" aria-describedby="e_name_bn">
+      <div class="msg" id="e_name_bn"></div>
+
+      <label for="name_en">Name (English) <span class="req">*</span></label>
+      <input id="name_en" name="name_en" maxlength="120" autocapitalize="words" aria-describedby="e_name_en">
+      <div class="msg" id="e_name_en"></div>
+
+      <label for="roll_no">রোল নং</label>
+      <input id="roll_no" name="roll_no" inputmode="numeric" maxlength="10" aria-describedby="e_roll_no">
+      <div class="msg" id="e_roll_no"></div>
+
+      <div class="row">
+        <div>
+          <label for="father_name">পিতার নাম <span class="req">*</span></label>
+          <input id="father_name" name="father_name" maxlength="120" aria-describedby="e_father_name">
+          <div class="msg" id="e_father_name"></div>
+        </div>
+        <div>
+          <label for="mother_name">মাতার নাম <span class="req">*</span></label>
+          <input id="mother_name" name="mother_name" maxlength="120" aria-describedby="e_mother_name">
+          <div class="msg" id="e_mother_name"></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="session">শিক্ষাবর্ষ <span class="req">*</span></label>
+          <select id="session" name="session" aria-describedby="e_session"><option value="">লোড হচ্ছে…</option></select>
+          <div class="msg" id="e_session"></div>
+        </div>
+        <div id="program_wrap" hidden>
+          <label for="program">প্রোগ্রাম <span class="req">*</span></label>
+          <select id="program" name="program" aria-describedby="e_program"></select>
+          <div class="msg" id="e_program"></div>
+        </div>
+      </div>
+      <div class="hint" id="year_info"></div>
+      <div class="msg" id="e_year_of_study"></div>
+
+      <div class="row">
+        <div>
+          <label for="mobile">মোবাইল নং <span class="req">*</span></label>
+          <input id="mobile" name="mobile" inputmode="tel" maxlength="20" placeholder="01XXXXXXXXX" aria-describedby="e_mobile">
+          <div class="msg" id="e_mobile"></div>
+        </div>
+        <div>
+          <label for="dob">জন্মতারিখ <span class="req">*</span></label>
+          <input id="dob" name="dob" type="date" aria-describedby="e_dob">
+          <div class="msg" id="e_dob"></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label id="gender_label">লিঙ্গ <span class="req">*</span></label>
+          <div class="gender" role="radiogroup" aria-labelledby="gender_label">
+            <label><input type="radio" name="gender" value="male"> ছেলে</label>
+            <label><input type="radio" name="gender" value="female"> মেয়ে</label>
+          </div>
+          <div class="msg" id="e_gender"></div>
+        </div>
+        <div>
+          <label for="blood_group">রক্তের গ্রুপ</label>
+          <select id="blood_group" name="blood_group" aria-describedby="e_blood_group">
+            <option value="">— বেছে নিন —</option>
+            <option>A+</option><option>A-</option><option>B+</option><option>B-</option>
+            <option>O+</option><option>O-</option><option>AB+</option><option>AB-</option>
+          </select>
+          <div class="msg" id="e_blood_group"></div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="guardian_name">অভিভাবকের নাম <span class="req">*</span></label>
+          <input id="guardian_name" name="guardian_name" maxlength="120" aria-describedby="e_guardian_name">
+          <div class="msg" id="e_guardian_name"></div>
+        </div>
+        <div>
+          <label for="guardian_mobile">অভিভাবকের মোবাইল <span class="req">*</span></label>
+          <input id="guardian_mobile" name="guardian_mobile" inputmode="tel" maxlength="20" placeholder="01XXXXXXXXX" aria-describedby="e_guardian_mobile">
+          <div class="msg" id="e_guardian_mobile"></div>
+        </div>
+      </div>
+
+      <h2 style="margin-top:20px">ঠিকানা <span class="req" style="color:#c62828">*</span></h2>
+      <div class="row">
+        <div>
+          <label for="village">গ্রাম / মহল্লা <span class="req">*</span></label>
+          <input id="village" name="village" maxlength="120" aria-describedby="e_village">
+          <div class="msg" id="e_village"></div>
+        </div>
+        <div>
+          <label for="post_office">ডাকঘর</label>
+          <input id="post_office" name="post_office" maxlength="120" aria-describedby="e_post_office">
+          <div class="msg" id="e_post_office"></div>
+        </div>
+        <div>
+          <label for="thana">থানা / উপজেলা <span class="req">*</span></label>
+          <input id="thana" name="thana" maxlength="120" aria-describedby="e_thana">
+          <div class="msg" id="e_thana"></div>
+        </div>
+        <div>
+          <label for="district">জেলা <span class="req">*</span></label>
+          <input id="district" name="district" maxlength="120" aria-describedby="e_district">
+          <div class="msg" id="e_district"></div>
+        </div>
+      </div>
+
+      <!-- honeypot: people never see or fill this; robots do -->
+      <div class="hp" aria-hidden="true">
+        <label for="website">Website</label>
+        <input id="website" name="website" tabindex="-1" autocomplete="off">
+      </div>
+
+      <button type="submit" class="primary" id="send">জমা দিন</button>
+    </form>
+  </main>
+  <footer>প্রাণিবিদ্যা বিভাগ, রংপুর সরকারি কলেজ</footer>
+
+  <script src="config.js"></script>
+  <script src="validate.js"></script>
+  <script src="form.js"></script>
+</body>
+</html>

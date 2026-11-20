@@ -4,11 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>শিক্ষক ও কর্মচারী — প্রাণিবিদ্যা বিভাগ</title>
-  <meta name="description" content="বিভাগের শিক্ষক ও কর্মচারীদের পরিচিতি">
-  <meta name="theme-color" content="#1b6b4a">
+  <meta name="description" content="প্রাণিবিদ্যা বিভাগের শিক্ষক ও কর্মচারীদের পরিচিতি">
+  <meta name="color-scheme" content="light dark">
+  <meta name="theme-color" content="#0F3D3E">
+  <script>
+(function(){var d=document.documentElement;function v(p){return p==="light"||p==="dark"||p==="auto"}
+function g(){var p=null;try{p=localStorage.getItem("site-theme")}catch(e){}if(v(p))return p;p=d.getAttribute("data-theme-pref");return v(p)?p:"auto"}
+function a(o){try{var p=v(o)?o:g(),m=window.matchMedia&&matchMedia("(prefers-color-scheme: dark)"),k=p==="dark"||(p==="auto"&&!!m&&m.matches),t=document.querySelector('meta[name="theme-color"]');d.setAttribute("data-theme",k?"dark":"light");d.setAttribute("data-theme-pref",p);if(t)t.setAttribute("content",k?"#11221F":"#0F3D3E")}catch(e){}}
+a();try{var q=matchMedia("(prefers-color-scheme: dark)");if(q.addEventListener)q.addEventListener("change",function(){a()});else if(q.addListener)q.addListener(function(){a()});addEventListener("storage",function(){a()})}catch(e){}
+window.SiteTheme={apply:a,get:g}})();
+</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+Bengali:wght@400;600;700&amp;display=swap">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600&amp;family=Noto+Serif+Bengali:wght@600;700&amp;display=swap">
   <link rel="icon" type="image/png" href="img/favicon-64.png">
   <link rel="apple-touch-icon" href="img/apple-touch-icon.png">
   <link rel="stylesheet" href="site.css">

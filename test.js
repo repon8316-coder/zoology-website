@@ -589,3 +589,226 @@ console.log("student import OK");
   }
 }
 console.log("task 53 (head corner, museum, library) OK");
+
+// ---------------- Task 54: public site redesign (pure helpers) ----------------
+{
+  const L = S;                                   // lib.js
+  const FX = require("./test-fixtures.js");
+  const vm = require("vm"), fs54 = require("fs"), path54 = require("path");
+
+  // --- dates and times (Bangla digits, no time zone shifts for plain dates)
+  assert.strictEqual(L.isoWeekday("2026-11-22"), 7);                                // Sunday
+  assert.strictEqual(L.isoWeekday("2026-11-23"), 1);                                // Monday
+  assert.strictEqual(L.isoWeekday("2026-11-20"), 5);                                // Friday
+  assert.strictEqual(L.isoWeekday("2026-02-30"), 0); assert.strictEqual(L.isoWeekday("nonsense"), 0); assert.strictEqual(L.isoWeekday(null), 0);
+  assert.strictEqual(L.formatDateOnly("2026-11-20"), "২০/১১/২০২৬"); assert.strictEqual(L.formatDateOnly("2025-03-05"), "০৫/০৩/২০২৫"); assert.strictEqual(L.formatDateOnly("x"), "");
+  assert.strictEqual(L.formatLongDate("2026-11-20"), "২০ নভেম্বর ২০২৬, শুক্রবার");
+  assert.strictEqual(L.formatLongDate("2026-01-01"), "১ জানুয়ারি ২০২৬, বৃহস্পতিবার");
+  assert.strictEqual(L.formatLongDate("2026-11-22"), "২২ নভেম্বর ২০২৬, রবিবার"); assert.strictEqual(L.formatLongDate("bad"), "");
+  assert.strictEqual(L.formatDayMonth("2026-12-05"), "৫ ডিসেম্বর");
+  assert.strictEqual(L.formatTime("09:05"), "০৯:০৫"); assert.strictEqual(L.formatTime("9:05"), "০৯:০৫"); assert.strictEqual(L.formatTime("14:30:00"), "১৪:৩০");
+  ["24:00", "09:60", "abc", "", null, 5].forEach((t) => assert.strictEqual(L.formatTime(t), "", String(t)));
+  assert.strictEqual(L.formatTimeRange("09:00", "09:50"), "০৯:০০ – ০৯:৫০"); assert.strictEqual(L.formatTimeRange("09:00", "bad"), "০৯:০০"); assert.strictEqual(L.formatTimeRange("x", "y"), "");
+  assert.strictEqual(L.weekdayName(7), "রবিবার"); assert.strictEqual(L.weekdayShort(1), "সোম"); assert.strictEqual(L.weekdayName(9), "");
+
+  // --- routine: grouping by cell, exceptions, today rows, current period
+  const R = FX.routine;
+  assert.deepStrictEqual(L.sortedPeriods(R).map((p) => p.period_no), [1, 2, 3]);       // sorted although the server list was not
+  const c72 = L.buildCell(R, 7, 2);
+  assert.strictEqual(c72.length, 2);                                                  // two slots share a cell, both kept, in order
+  assert.deepStrictEqual(c72.map((e) => e.slot.subject_code), ["ZOO-102", "ZOO-103P"]);
+  assert.strictEqual(c72[0].today.kind, "substitute"); assert.strictEqual(c72[0].today.substitute_name, "জনাব হাসান"); assert.strictEqual(c72[1].today, null);
+  const c71 = L.buildCell(R, 7, 1);
+  assert.strictEqual(c71.length, 1); assert.strictEqual(c71[0].today.kind, "cancelled");
+  assert.strictEqual(c71[0].notes.length, 2);                                         // today + the same weekday next week, both shown with their date
+  assert.deepStrictEqual(c71[0].notes.map((n) => n.on_date), ["2026-11-22", "2026-11-29"]);
+  assert.strictEqual(L.buildCell(R, 1, 1)[0].today, null);                            // Monday's cancellation is tomorrow, not today
+  assert.strictEqual(L.buildCell(R, 1, 1)[0].notes[0].on_date, "2026-11-23");
+  assert.strictEqual(L.buildCell(R, 7, 3).length, 0); assert.strictEqual(L.buildCell(null, 7, 3).length, 0); assert.strictEqual(L.buildCell({}, 1, 1).length, 0);
+  // an exception that matches no slot becomes its own entry; one without a subject code applies to every slot of the cell
+  const odd = Object.assign({}, R, { exceptions: [{ on_date: R.today, day: 7, period_no: 3, kind: "cancelled", subject_code: "ZOO-999", teacher_name: "X", substitute_name: null },
+    { on_date: R.today, day: 7, period_no: 2, kind: "cancelled", subject_code: null, teacher_name: null, substitute_name: null }] });
+  const o73 = L.buildCell(odd, 7, 3); assert.strictEqual(o73.length, 1); assert.strictEqual(o73[0].standalone, true); assert.strictEqual(o73[0].today.kind, "cancelled");
+  assert.ok(L.buildCell(odd, 7, 2).every((e) => e.today && e.today.kind === "cancelled"));
+  // today's rows
+  const T = L.todayRows(R);
+  assert.strictEqual(T.working, true); assert.strictEqual(T.weekday, 7);
+  assert.deepStrictEqual(T.rows.map((r) => r.period.period_no), [1, 2]);              // only periods that have a class, in order
+  assert.deepStrictEqual(T.rows.map((r) => r.current), [false, true]);                // now_period = 2
+  const friday = Object.assign({}, R, { today: "2026-11-20", now_period: null });     // Friday is not a working day
+  assert.deepStrictEqual(L.todayRows(friday), { date: "2026-11-20", weekday: 5, working: false, rows: [] });
+  assert.strictEqual(L.todayRows(Object.assign({}, R, { today: "2026-11-25" })).rows.length, 0);   // Wednesday: a working day without any class for this batch
+  assert.strictEqual(L.todayRows(Object.assign({}, R, { today: "2026-11-25" })).working, true);
+  assert.strictEqual(L.todayRows(Object.assign({}, R, { now_period: null })).rows.some((r) => r.current), false);
+  assert.strictEqual(L.todayRows(null).working, false); assert.strictEqual(L.todayRows({ today: "2026-11-22", working_days: [7], periods: [], slots: [] }).rows.length, 0);
+  assert.strictEqual(L.isTodayDay(R, 7), true); assert.strictEqual(L.isTodayDay(R, 1), false);
+  assert.strictEqual(L.isNowPeriod(R, 7, 2), true); assert.strictEqual(L.isNowPeriod(R, 7, 1), false); assert.strictEqual(L.isNowPeriod(R, 1, 2), false);   // a Monday cell is never "now" on a Sunday
+  assert.strictEqual(L.isNowPeriod(Object.assign({}, R, { now_period: null }), 7, 2), false);
+  // upcoming changes
+  const U54 = L.upcomingChanges(R);
+  assert.deepStrictEqual(U54.map((c) => c.on_date), [FX.TODAY, FX.TODAY, "2026-11-23", "2026-11-29"]);
+  assert.strictEqual(U54[0].subject_name, "প্রাণিবিদ্যা পরিচিতি"); assert.strictEqual(U54[1].substitute_name, "জনাব হাসান"); assert.strictEqual(U54[0].period.start, "09:00");
+  assert.deepStrictEqual(L.upcomingChanges({}), []); assert.deepStrictEqual(L.upcomingChanges(null), []);
+  assert.strictEqual(L.changeLabel(R.exceptions[0]), "বাতিল"); assert.strictEqual(L.changeLabel(R.exceptions[1]), "বদলি: জনাব হাসান");
+  assert.strictEqual(L.changeLabel({ kind: "substitute" }), "বদলি"); assert.strictEqual(L.changeLabel(null), "");
+  assert.strictEqual(L.classTypeLabel("practical"), "ব্যবহারিক"); assert.strictEqual(L.classTypeLabel("theory"), "");
+
+  // --- batches
+  assert.strictEqual(L.batchLabel(FX.batches.batches[0]), "২০২৫-২৬ সেশন · ১ম বর্ষ");
+  assert.strictEqual(L.yearLabel(3), "৩য় বর্ষ"); assert.strictEqual(L.yearLabel(4), "৪র্থ বর্ষ"); assert.strictEqual(L.yearLabel(0), "");
+  const G = L.groupBatches(FX.batches.batches);
+  assert.deepStrictEqual(G.map((g) => [g.label, g.items.length]), [["বি.এস.সি. (সম্মান)", 2], ["Degree (Pass)", 1]]);   // program_bn first, then program
+  assert.strictEqual(L.pickBatch(FX.batches.batches, FX.B2), FX.B2);
+  assert.strictEqual(L.pickBatch(FX.batches.batches, "gone"), ""); assert.strictEqual(L.pickBatch(FX.batches.batches, null), "");   // nothing chosen: the visitor must choose
+  assert.strictEqual(L.pickBatch([FX.batches.batches[0]], null), FX.B1); assert.strictEqual(L.pickBatch([], "x"), "");
+
+  // --- theme resolution
+  assert.strictEqual(L.resolveTheme("auto", true), "dark"); assert.strictEqual(L.resolveTheme("auto", false), "light");
+  assert.strictEqual(L.resolveTheme("light", true), "light"); assert.strictEqual(L.resolveTheme("dark", false), "dark");
+  assert.strictEqual(L.resolveTheme("bogus", true), "dark"); assert.strictEqual(L.resolveTheme(null, false), "light");   // an unknown value means auto
+  assert.deepStrictEqual(["auto", "light", "dark", "auto", "x"].map(L.nextThemePref), ["light", "dark", "auto", "light", "light"]);
+  assert.deepStrictEqual(["auto", "light", "dark"].map(L.themeLabel), ["অটো মুড", "ডে মুড", "নাইট মুড"]);
+
+  // --- the inline theme script in the head of every public page: identical everywhere, absent from form.html, and it really works
+  const pagesWithTheme = ["index", "about", "head", "teachers", "notices", "notice", "routine", "museum", "museum-item", "library", "gallery", "downloads", "contact"];
+  const scripts = pagesWithTheme.map((n) => {
+    const html = fs54.readFileSync(path54.join(__dirname, n + ".html"), "utf8");
+    const m = /<head>[\s\S]*?(<script>[\s\S]*?<\/script>)[\s\S]*?<\/head>/.exec(html);
+    assert.ok(m, n + " has an inline script in <head>");
+    assert.ok(html.indexOf('name="theme-color"') < html.indexOf(m[1]), n + ": meta theme-color comes before the script");
+    assert.ok(html.indexOf(m[1]) < html.indexOf('rel="stylesheet"'), n + ": the script runs before the stylesheet is applied");
+    assert.ok(/<meta name="color-scheme" content="light dark">/.test(html), n);
+    assert.ok(/<link rel="stylesheet" href="site\.css">/.test(html) && /src="site\.js"/.test(html) && /src="pages\.js"/.test(html), n);
+    assert.ok(!/https?:\/\/[^"']*github\.io/.test(html), n + ": no hard-coded github.io address");
+    return m[1];
+  });
+  assert.ok(scripts.every((s) => s === scripts[0]), "the theme script is identical on every page");
+  assert.ok(!/site-theme|data-theme/.test(fs54.readFileSync(path54.join(__dirname, "form.html"), "utf8")), "form.html is untouched by the theme");
+  const themeSrc = scripts[0].replace(/^<script>/, "").replace(/<\/script>$/, "");
+  function runTheme(opts) {
+    const attrs = {}, metaAttrs = { content: "#0F3D3E" }, listeners = {};
+    let mqHandler = null;
+    const ctx = {
+      document: { documentElement: { setAttribute: (k, v) => { attrs[k] = v; }, getAttribute: (k) => (k in attrs ? attrs[k] : null) },
+        querySelector: (sel) => (/theme-color/.test(sel) ? { setAttribute: (k, v) => { metaAttrs[k] = v; } } : null) },
+      localStorage: opts.storage === "throws" ? { getItem() { throw new Error("blocked"); } } : { getItem: () => (opts.storage == null ? null : opts.storage) },
+      matchMedia: opts.noMatchMedia ? undefined : () => ({ matches: !!opts.dark, addEventListener: (t, f) => { mqHandler = f; } }),
+      addEventListener: (t, f) => { listeners[t] = f; }
+    };
+    ctx.window = ctx;
+    vm.runInNewContext(themeSrc, ctx);
+    return { attrs, metaAttrs, ctx, fireSystemChange(dark) { opts.dark = dark; mqHandler && mqHandler(); } };
+  }
+  let th = runTheme({ dark: false }); assert.strictEqual(th.attrs["data-theme"], "light"); assert.strictEqual(th.attrs["data-theme-pref"], "auto"); assert.strictEqual(th.metaAttrs.content, "#0F3D3E");
+  th = runTheme({ dark: true }); assert.strictEqual(th.attrs["data-theme"], "dark"); assert.strictEqual(th.metaAttrs.content, "#11221F");
+  th = runTheme({ dark: true, storage: "light" }); assert.strictEqual(th.attrs["data-theme"], "light"); assert.strictEqual(th.attrs["data-theme-pref"], "light");   // the choice beats the system
+  th = runTheme({ dark: false, storage: "dark" }); assert.strictEqual(th.attrs["data-theme"], "dark");
+  th = runTheme({ dark: true, storage: "garbage" }); assert.strictEqual(th.attrs["data-theme-pref"], "auto"); assert.strictEqual(th.attrs["data-theme"], "dark");
+  th = runTheme({ dark: true, storage: "throws" }); assert.strictEqual(th.attrs["data-theme"], "dark");                      // blocked storage: still works, still auto
+  th = runTheme({ noMatchMedia: true }); assert.strictEqual(th.attrs["data-theme"], "light");                                  // very old browser: light, no error
+  th = runTheme({ dark: false }); th.fireSystemChange(true); assert.strictEqual(th.attrs["data-theme"], "dark");               // auto follows the system when it changes
+  th = runTheme({ dark: false, storage: "light" }); th.fireSystemChange(true); assert.strictEqual(th.attrs["data-theme"], "light");   // a choice does not
+  th = runTheme({ dark: false }); th.ctx.SiteTheme.apply("dark"); assert.strictEqual(th.attrs["data-theme"], "dark"); assert.strictEqual(th.ctx.SiteTheme.get(), "dark");   // the button's override works even if storage is blocked
+
+  assert.strictEqual(L.asciiDigits("১২৩abc৪"), "123abc4"); assert.strictEqual(L.asciiDigits(null), "");
+  // --- text helpers
+  assert.strictEqual(L.plainFromMarkdown("# শিরোনাম\n\n**মোটা** ও *বাঁকা* [লিংক](https://example.com) টেক্সট\n\n- এক\n- দুই\n\n---"), "শিরোনাম মোটা ও বাঁকা লিংক টেক্সট এক দুই");
+  assert.strictEqual(L.plainFromMarkdown(null), "");
+  assert.strictEqual(L.excerpt("ছোট লেখা", 280), "ছোট লেখা");
+  const long = L.excerpt("শব্দ ".repeat(200), 280);
+  assert.ok(Array.from(long).length <= 281 && long.endsWith("…") && !/\s…$/.test(long));
+  assert.strictEqual(Array.from(L.excerpt("ক".repeat(500), 10)).length, 11);        // counts characters; no word break -> hard cut
+  assert.ok(L.excerpt("x".repeat(100) + " yy", 100).endsWith("…"));
+  assert.strictEqual(L.excerpt(null, 5), "");
+
+  // --- library: state in the query string
+  assert.deepStrictEqual(L.libraryState(""), { q: "", category: "", page: 1 });
+  assert.deepStrictEqual(L.libraryState("?q=%E0%A6%AC%E0%A6%87&category=A+B&page=3"), { q: "বই", category: "A B", page: 3 });
+  assert.strictEqual(L.libraryState("?page=৪").page, 4);                              // Bangla digits are accepted
+  ["?page=0", "?page=-2", "?page=abc", "?page=99999999"].forEach((s) => assert.strictEqual(L.libraryState(s).page, 1, s));
+  assert.strictEqual(L.libraryState("?q=" + "a".repeat(300)).q.length, 100);
+  assert.strictEqual(L.libraryHref({ q: "", category: "", page: 1 }), "library.html");
+  assert.strictEqual(L.libraryHref({ q: "বই", category: "জার্নাল", page: 2 }), "library.html?q=" + encodeURIComponent("বই") + "&category=" + encodeURIComponent("জার্নাল") + "&page=2");
+  assert.deepStrictEqual(L.libraryState(L.libraryHref({ q: "a&b=c", category: "x y", page: 7 }).replace("library.html", "")), { q: "a&b=c", category: "x y", page: 7 });   // round trip
+  assert.deepStrictEqual(L.libraryParams({ q: "", category: "", page: 1 }), { p_q: null, p_category: null, p_limit: 20, p_offset: 0 });
+  assert.deepStrictEqual(L.libraryParams({ q: "x", category: "c", page: 3 }), { p_q: "x", p_category: "c", p_limit: 20, p_offset: 40 });
+  assert.ok(L.LIB_PER_PAGE <= 50);
+
+  // --- museum: client-side filter
+  const M = FX.museum.items;
+  assert.strictEqual(L.museumFilter(M, "", "").length, 4);
+  assert.strictEqual(L.museumFilter(M, "", "উভচর").length, 2);
+  assert.strictEqual(L.museumFilter(M, "নমুনা 3", "").length, 1);                       // Bangla title
+  assert.strictEqual(L.museumFilter(M, "RANA TIGRINA 2", "").length, 1);                // scientific name, any letter case
+  assert.strictEqual(L.museumFilter(M, "specimen", "সরীসৃপ").length, 2);               // English title + category
+  assert.strictEqual(L.museumFilter(M, "mus-004", "").length, 1);
+  assert.strictEqual(L.museumFilter(M, "zzz", "").length, 0); assert.deepStrictEqual(L.museumFilter(null, "a", ""), []);
+}
+console.log("task 54 helpers OK");
+
+// ---------------- Task 54: wiring and safety of the public files ----------------
+{
+  const fs54 = require("fs"), path54 = require("path");
+  const read = (f) => fs54.readFileSync(path54.join(__dirname, f), "utf8");
+  const pagesList = () => ["index", "about", "head", "teachers", "notices", "notice", "routine", "museum", "museum-item", "library", "gallery", "downloads", "contact"];
+  // no unsafe DOM writes, no secrets, no hard-coded host in the public code
+  ["site.js", "pages.js", "lib.js"].forEach((f) => {
+    const src = read(f);
+    assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|eval\(|service_role/.test(src), f);
+    assert.ok(!/github\.io|supabase\.co/.test(src), f + ": the address lives only in config.js");
+  });
+  // no new third-party scripts: the only external thing is the Google Fonts stylesheet
+  pagesList().forEach((n) => {
+    const html = read(n + ".html");
+    const ext = (html.match(/(?:src|href)="https?:\/\/[^"]+"/g) || []);
+    assert.ok(ext.every((u) => /fonts\.(googleapis|gstatic)\.com/.test(u)), n + ": " + ext.join(" "));
+    assert.ok(!/<script[^>]+src="https?:/.test(html), n);
+    assert.ok(/<a class="skip" href="#main">/.test(html) && /<main id="main" tabindex="-1">/.test(html), n + ": skip link and main kept");
+    assert.ok(/Hind\+Siliguri/.test(html) && /Noto\+Serif\+Bengali/.test(html) && /display=swap/.test(html) && /rel="preconnect"/.test(html), n + ": fonts");
+  });
+  // every new page script is registered for its <body data-page>
+  const pg = read("pages.js");
+  ["home", "head", "routine", "museum", "\"museum-item\"", "library"].forEach((k) => assert.ok(new RegExp("pages(\\." + k + "|\\[" + k + "\\]) = function").test(pg), k));
+  pagesList().forEach((n) => {
+    const m = /<body data-page="([^"]+)">/.exec(read(n + ".html"));
+    assert.ok(m && new RegExp("pages(\\." + m[1] + "|\\[\"" + m[1] + "\"\\]) = function").test(pg), n);
+  });
+  // the nav and the footer offer the new pages (relative links)
+  const site = read("site.js");
+  ["head.html", "routine.html", "museum.html", "library.html"].forEach((f) => assert.ok(site.indexOf('"' + f + '"') >= 0, f));
+  // only the documented RPCs are called by the new pages
+  const rpcs = (pg.match(/S\.rpc\("([a-z_]+)"/g) || []).map((x) => x.slice(7, -1));
+  const allowed = ["web_site_home", "web_site_head", "web_site_routine_batches", "web_site_routine", "web_site_museum", "web_site_museum_item", "web_site_library",
+    "web_site_library_categories", "web_site_page", "web_site_people", "web_site_notices", "web_site_notice", "web_site_gallery", "web_site_downloads"];
+  assert.ok(rpcs.every((r) => allowed.indexOf(r) >= 0), rpcs.join(","));
+  ["web_site_head", "web_site_routine_batches", "web_site_routine", "web_site_museum", "web_site_museum_item", "web_site_library", "web_site_library_categories"].forEach((r) => assert.ok(rpcs.indexOf(r) >= 0, r));
+  // CSS: the tokens exist for both themes, motion is guarded, print sheet exists, focus ring is defined, no gradient washes
+  const css = read("site.css");
+  ["--bg", "--surface", "--text", "--muted", "--primary", "--accent", "--line", "--focus", "--head-bg"].forEach((t) => {
+    assert.ok(new RegExp(t + ":").test(css.split(':root[data-theme="dark"]')[0]), "day token " + t);
+    assert.ok(new RegExp(t + ":").test(css.split(':root[data-theme="dark"]')[1].split("@media")[0]), "night token " + t);
+  });
+  ["#0F3D3E", "#2F7D4F", "#C9871C", "#EEF4F1", "#14231F", "#CBD9D2", "#0A1614", "#11221F", "#172B27", "#E4EFEA", "#9DB5AB", "#6FCF9F", "#F2B94B", "#26403A"].forEach((c) => assert.ok(css.toUpperCase().indexOf(c) >= 0, c));
+  assert.ok(/prefers-reduced-motion: no-preference/.test(css) && !/transition\s*:/.test(css), "animations only when motion is allowed; no transitions");
+  assert.ok(/@media print/.test(css) && /:focus-visible/.test(css) && /prefers-color-scheme: dark/.test(css));
+  assert.ok(!/gradient\(\s*(135|180|to )/.test(css) && !/linear-gradient\([^)]*(var\(--primary|#1b6b4a)/i.test(css), "no decorative colour washes");
+  // contrast: every colour pair of the tokens meets WCAG AA in both themes (docs/contrast-report.js lists the ratios)
+  {
+    const CR = require("./docs/contrast-report.js");
+    const res = CR.compute(read("site.css"));
+    const bad = res.rows.filter((r) => !r.pass).map((r) => r.theme + ": " + r.label + " " + r.ratio.toFixed(2));
+    assert.deepStrictEqual(bad, []);
+    assert.ok(res.sameAuto, "the system-dark block equals the chosen-dark block");
+    assert.ok(res.rows.length >= 60);
+    assert.ok(/aria-pressed="true"\]/.test(read("site.css")));
+  }
+  // form.html keeps its own files
+  const form = read("form.html");
+  assert.ok(/href="style\.css"/.test(form) && !/site\.(css|js)/.test(form) && /src="form\.js"/.test(form));
+  // docs
+  assert.ok(fs54.existsSync(path54.join(__dirname, "docs", "DESIGN.md")));
+}
+console.log("task 54 files OK");
+
+// the page smoke test (fake DOM + fake RPC answers)
+require("./test-dom.js").run().then(() => console.log("task 54 pages OK"), (e) => { console.error(e); process.exit(1); });

@@ -13,6 +13,11 @@
     return String(v == null ? "" : v).replace(/[0-9]/g, function (d) { return BN.charAt(+d); });
   }
 
+  // ০-৯ -> 0-9 (anything else is kept): for numbers typed or shared in Bangla digits
+  function asciiDigits(v) {
+    return String(v == null ? "" : v).replace(/[০-৯]/g, function (d) { return String(BN.indexOf(d)); });
+  }
+
   // ISO timestamp -> dd/mm/yyyy in Bangladesh time (UTC+6), Bangla digits. "" for a bad value.
   function formatDate(iso) {
     if (!iso) return "";
@@ -190,10 +195,252 @@
     return "ইন্টারনেট সংযোগ পাওয়া যাচ্ছে না বা তথ্য আনা যায়নি। আবার চেষ্টা করুন।";
   }
 
+  // ================= Task 54: dates, routine, theme, library, museum helpers =================
+  var WEEKDAYS = { 1: "সোমবার", 2: "মঙ্গলবার", 3: "বুধবার", 4: "বৃহস্পতিবার", 5: "শুক্রবার", 6: "শনিবার", 7: "রবিবার" };
+  var WEEKDAYS_SHORT = { 1: "সোম", 2: "মঙ্গল", 3: "বুধ", 4: "বৃহ", 5: "শুক্র", 6: "শনি", 7: "রবি" };
+  var MONTHS = ["জানুয়ারি", "ফেব্রুয়ারি", "মার্চ", "এপ্রিল", "মে", "জুন", "জুলাই", "আগস্ট", "সেপ্টেম্বর", "অক্টোবর", "নভেম্বর", "ডিসেম্বর"];
+
+  // "YYYY-MM-DD" (a date without time) -> {y, mo, d, t} or null. No time zone is involved (UTC maths on the calendar date).
+  function parseYmd(s) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})(?:$|[T ])/.exec(typeof s === "string" ? s : "");
+    if (!m) return null;
+    var y = +m[1], mo = +m[2], d = +m[3], t = Date.UTC(y, mo - 1, d), dt = new Date(t);
+    if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return null;
+    return { y: y, mo: mo, d: d, t: t };
+  }
+  // ISO weekday of a calendar date: 1 = Monday ... 7 = Sunday; 0 when the text is not a date
+  function isoWeekday(s) {
+    var p = parseYmd(s);
+    if (!p) return 0;
+    var w = new Date(p.t).getUTCDay();
+    return w === 0 ? 7 : w;
+  }
+  function weekdayName(n) { return WEEKDAYS[n] || ""; }
+  function weekdayShort(n) { return WEEKDAYS_SHORT[n] || ""; }
+  // "2026-11-20" -> "২০/১১/২০২৬"
+  function formatDateOnly(s) {
+    var p = parseYmd(s);
+    if (!p) return "";
+    return bnDigits(("0" + p.d).slice(-2) + "/" + ("0" + p.mo).slice(-2) + "/" + p.y);
+  }
+  // "2026-11-20" -> "২০ নভেম্বর ২০২৬, শুক্রবার"
+  function formatLongDate(s) {
+    var p = parseYmd(s);
+    if (!p) return "";
+    return bnDigits(p.d) + " " + MONTHS[p.mo - 1] + " " + bnDigits(p.y) + ", " + WEEKDAYS[isoWeekday(s)];
+  }
+  // "2026-11-20" -> "২০ নভেম্বর"
+  function formatDayMonth(s) {
+    var p = parseYmd(s);
+    return p ? bnDigits(p.d) + " " + MONTHS[p.mo - 1] : "";
+  }
+  // "09:05" or "09:05:00" -> "০৯:০৫"; "" for a bad value
+  function formatTime(t) {
+    var m = /^([01]?\d|2[0-3]):([0-5]\d)(?::[0-5]\d)?$/.exec(typeof t === "string" ? t.trim() : "");
+    return m ? bnDigits(("0" + m[1]).slice(-2) + ":" + m[2]) : "";
+  }
+  function formatTimeRange(a, b) {
+    var x = formatTime(a), y = formatTime(b);
+    return x && y ? x + " – " + y : (x || y);
+  }
+
+  // ---- routine ----
+  function cellKey(day, period) { return day + "|" + period; }
+
+  // The periods of the routine in order (bad rows left out)
+  function sortedPeriods(data) {
+    return ((data && data.periods) || []).filter(function (p) { return p && +p.period_no > 0; }).slice()
+      .sort(function (a, b) { return a.period_no - b.period_no; });
+  }
+
+  // The Bangla subject name for a code, taken from the slots (exceptions carry only the code)
+  function subjectNameFor(data, code) {
+    if (!code) return "";
+    var s = ((data && data.slots) || []).filter(function (x) { return x && x.subject_code === code; })[0];
+    return s ? (s.subject_name_bn || s.subject_name_en || "") : "";
+  }
+
+  // What stands in one cell (a day + a period). Several slots may share a cell, they stack in the given order.
+  // Every entry: {slot, notes:[exception...], today: exception|null, standalone}. An exception is matched to a slot by subject_code
+  // (an exception without a subject code applies to every slot of the cell). An exception that matches no slot is shown as its own entry.
+  // "today" is the exception dated data.today: the entry is then cancelled / has a substitute today.
+  function buildCell(data, day, period) {
+    data = data || {};
+    var entries = [];
+    (data.slots || []).forEach(function (s) {
+      if (s && +s.day === +day && +s.period_no === +period) entries.push({ slot: s, notes: [], today: null, standalone: false });
+    });
+    var exs = (data.exceptions || []).filter(function (e) { return e && +e.day === +day && +e.period_no === +period; })
+      .slice().sort(function (a, b) { return String(a.on_date).localeCompare(String(b.on_date)); });
+    exs.forEach(function (e) {
+      var hit = entries.filter(function (en) { return !en.standalone && (!e.subject_code || en.slot.subject_code === e.subject_code); });
+      if (!hit.length) {
+        hit = [{ slot: { subject_code: e.subject_code || "", teacher_name: e.teacher_name || "", subject_name_bn: subjectNameFor(data, e.subject_code) },
+                 notes: [], today: null, standalone: true }];
+        entries.push(hit[0]);
+      }
+      hit.forEach(function (en) {
+        en.notes.push(e);
+        if (e.on_date === data.today) en.today = e;
+      });
+    });
+    return entries;
+  }
+
+  // Rows of "today's classes": only periods that have a class, in period order.
+  // -> {date, weekday, working, rows:[{period:{period_no,start,end}, entries, current}]}
+  function todayRows(data) {
+    data = data || {};
+    var wd = isoWeekday(data.today);
+    var working = (data.working_days || []).indexOf(wd) >= 0;
+    var rows = [];
+    if (working) {
+      sortedPeriods(data).forEach(function (p) {
+        var entries = buildCell(data, wd, p.period_no);
+        if (entries.length) rows.push({ period: p, entries: entries, current: data.now_period != null && +data.now_period === +p.period_no });
+      });
+    }
+    return { date: data.today, weekday: wd, working: working, rows: rows };
+  }
+
+  // Is this column (ISO day) today? Is this period running now? (now_period comes from the server and means something only for today)
+  function isTodayDay(data, day) { return !!data && isoWeekday(data.today) === +day; }
+  function isNowPeriod(data, day, period) { return isTodayDay(data, day) && data.now_period != null && +data.now_period === +period; }
+
+  // The changes of the next days, sorted by date then period
+  function upcomingChanges(data) {
+    var periods = {};
+    sortedPeriods(data).forEach(function (p) { periods[p.period_no] = p; });
+    return ((data && data.exceptions) || []).filter(function (e) { return e && (e.kind === "cancelled" || e.kind === "substitute"); })
+      .slice().sort(function (a, b) { return String(a.on_date).localeCompare(String(b.on_date)) || (a.period_no - b.period_no); })
+      .map(function (e) {
+        return { on_date: e.on_date, day: e.day, period_no: e.period_no, kind: e.kind, subject_code: e.subject_code || "",
+                 subject_name: subjectNameFor(data, e.subject_code), teacher_name: e.teacher_name || "", substitute_name: e.substitute_name || "",
+                 period: periods[e.period_no] || null };
+      });
+  }
+
+  function classTypeLabel(t) { return t === "practical" ? "ব্যবহারিক" : ""; }
+  function changeLabel(ex) {
+    if (!ex) return "";
+    if (ex.kind === "cancelled") return "বাতিল";
+    if (ex.kind === "substitute") return ex.substitute_name ? "বদলি: " + ex.substitute_name : "বদলি";
+    return "";
+  }
+
+  // ---- batches ----
+  var ORD = { 1: "১ম", 2: "২য়", 3: "৩য়", 4: "৪র্থ" };
+  function yearLabel(y) {
+    y = +y;
+    if (!y) return "";
+    return (ORD[y] || bnDigits(y) + "ম") + " বর্ষ";
+  }
+  function programName(b) { return (b && (b.program_bn || b.program)) || ""; }
+  // "২০২৫-২৬ সেশন · ১ম বর্ষ"
+  function batchLabel(b) {
+    if (!b) return "";
+    var parts = [];
+    if (b.session) parts.push(bnDigits(b.session) + " সেশন");
+    var y = yearLabel(b.year_of_study);
+    if (y) parts.push(y);
+    return parts.join(" · ");
+  }
+  // [{label, items}] grouped by program name, in the order the programs first appear
+  function groupBatches(batches) {
+    var groups = [], by = {};
+    (batches || []).forEach(function (b) {
+      if (!b || !b.id) return;
+      var k = programName(b) || "অন্যান্য";
+      if (!by[k]) { by[k] = { label: k, items: [] }; groups.push(by[k]); }
+      by[k].items.push(b);
+    });
+    return groups;
+  }
+  // The remembered batch when it still exists; the only batch when there is exactly one; otherwise "" (the visitor must choose)
+  function pickBatch(batches, saved) {
+    var list = batches || [];
+    if (saved) for (var i = 0; i < list.length; i++) if (list[i] && list[i].id === saved) return saved;
+    return list.length === 1 && list[0] && list[0].id ? list[0].id : "";
+  }
+
+  // ---- theme ----
+  function normalizeThemePref(p) { return p === "light" || p === "dark" ? p : "auto"; }
+  // pref ("light" | "dark" | "auto") + the system setting -> "light" | "dark"
+  function resolveTheme(pref, systemDark) {
+    var p = normalizeThemePref(pref);
+    return p === "auto" ? (systemDark ? "dark" : "light") : p;
+  }
+  // The header button cycles auto -> day -> night -> auto
+  function nextThemePref(p) {
+    p = normalizeThemePref(p);
+    return p === "auto" ? "light" : p === "light" ? "dark" : "auto";
+  }
+  var THEME_LABELS = { auto: "অটো মুড", light: "ডে মুড", dark: "নাইট মুড" };
+  function themeLabel(p) { return THEME_LABELS[normalizeThemePref(p)]; }
+
+  // ---- text ----
+  // Markdown -> plain text (no marks); paragraphs and list items are joined with a space
+  function plainFromMarkdown(md) {
+    var out = [];
+    parseMarkdown(md).forEach(function (b) {
+      if (b.t === "hr") return;
+      var texts = b.t === "ul" || b.t === "ol" ? b.items : [b.text];
+      texts.forEach(function (t) {
+        out.push(parseInline(t).map(function (x) { return x.t === "br" ? " " : x.v; }).join(""));
+      });
+    });
+    return out.join(" ").replace(/\s+/g, " ").trim();
+  }
+  // At most max characters (not UTF-16 units), cut at a space when one is near the end, "…" added
+  function excerpt(text, max) {
+    var chars = Array.from(String(text == null ? "" : text).replace(/\s+/g, " ").trim());
+    max = Math.max(1, +max || 280);
+    if (chars.length <= max) return chars.join("");
+    var cut = chars.slice(0, max), sp = cut.lastIndexOf(" ");
+    if (sp > max * 0.6) cut = cut.slice(0, sp);
+    return cut.join("").replace(/[\s,;:।.\-–—]+$/, "") + "…";
+  }
+
+  // ---- seminar library: the state lives in the URL ----
+  var LIB_PER_PAGE = 20;
+  function libraryState(search) {
+    var q = parseQuery(search);
+    var raw = asciiDigits(q.page || "1").trim();
+    var page = /^[0-9]{1,5}$/.test(raw) ? parseInt(raw, 10) : 1;     // anything that is not a plain number means page 1
+    return { q: (q.q || "").trim().slice(0, 100), category: (q.category || "").trim().slice(0, 60), page: page > 0 ? page : 1 };
+  }
+  function libraryHref(st) {
+    st = st || {};
+    return "library.html" + buildQuery({ q: st.q || "", category: st.category || "", page: st.page > 1 ? String(st.page) : "" });
+  }
+  function libraryParams(st) {
+    st = st || {};
+    return { p_q: st.q || null, p_category: st.category || null, p_limit: LIB_PER_PAGE, p_offset: (Math.max(1, st.page || 1) - 1) * LIB_PER_PAGE };
+  }
+
+  // ---- museum: client-side filter ----
+  function museumFilter(items, q, category) {
+    var needle = String(q || "").trim().toLowerCase();
+    return (items || []).filter(function (it) {
+      if (!it) return false;
+      if (category && it.category !== category) return false;
+      if (!needle) return true;
+      return [it.title_bn, it.title_en, it.scientific_name, it.catalog_no].some(function (x) { return x && String(x).toLowerCase().indexOf(needle) >= 0; });
+    });
+  }
+
   return {
-    bnDigits: bnDigits, formatDate: formatDate, formatSize: formatSize, fileUrl: fileUrl, safeHttpUrl: safeHttpUrl,
+    bnDigits: bnDigits, asciiDigits: asciiDigits, formatDate: formatDate, formatSize: formatSize, fileUrl: fileUrl, safeHttpUrl: safeHttpUrl,
     safeEmail: safeEmail, telHref: telHref, safeHref: safeHref, parseInline: parseInline, parseMarkdown: parseMarkdown,
     pageInfo: pageInfo, pageNumbers: pageNumbers, isUuid: isUuid, parseQuery: parseQuery, buildQuery: buildQuery,
-    initials: initials, errorMessage: errorMessage, PUBLIC_BUCKET: PUBLIC_BUCKET
+    initials: initials, errorMessage: errorMessage, PUBLIC_BUCKET: PUBLIC_BUCKET,
+    parseYmd: parseYmd, isoWeekday: isoWeekday, weekdayName: weekdayName, weekdayShort: weekdayShort, formatDateOnly: formatDateOnly,
+    formatLongDate: formatLongDate, formatDayMonth: formatDayMonth, formatTime: formatTime, formatTimeRange: formatTimeRange,
+    cellKey: cellKey, sortedPeriods: sortedPeriods, buildCell: buildCell, subjectNameFor: subjectNameFor, todayRows: todayRows,
+    isTodayDay: isTodayDay, isNowPeriod: isNowPeriod, upcomingChanges: upcomingChanges, classTypeLabel: classTypeLabel, changeLabel: changeLabel,
+    yearLabel: yearLabel, programName: programName, batchLabel: batchLabel, groupBatches: groupBatches, pickBatch: pickBatch,
+    normalizeThemePref: normalizeThemePref, resolveTheme: resolveTheme, nextThemePref: nextThemePref, themeLabel: themeLabel,
+    plainFromMarkdown: plainFromMarkdown, excerpt: excerpt, libraryState: libraryState, libraryHref: libraryHref, libraryParams: libraryParams,
+    LIB_PER_PAGE: LIB_PER_PAGE, museumFilter: museumFilter
   };
 });

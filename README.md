@@ -9,20 +9,28 @@ The data comes from the department's Supabase database. The logged-out website m
 admin panel (`admin/`, see below) after signing in with an admin account.
 
 ## Pages
-| File | What |
-|---|---|
-| `index.html` | hero, latest notices, quick links, teacher preview |
-| `about.html` | about / history / vision (pages `about`, `history`, `vision`) |
-| `teachers.html` | teachers and staff (a curated public list, not the app's user table) |
-| `notices.html`, `notice.html?id=…` | notice list (category filter, pagination) and one notice |
-| `gallery.html` | albums and photos with a keyboard-friendly lightbox |
-| `downloads.html` | files to download, grouped by category |
-| `contact.html` | address, phone, e-mail, map link, social links, contact text (page `contact`) |
-| `form.html` | the student information form (unchanged; `form.js`, `validate.js`, `style.css`) |
+| File | What | Data source (database function) | Edited in the admin panel |
+|---|---|---|---|
+| `index.html` | hero with the **"আজকের ক্লাস"** card, latest notices, head corner, quick links, teacher strip, 3 museum items, gallery strip | `web_site_home`, `web_site_routine_batches`, `web_site_routine`, `web_site_head`, `web_site_museum`, `web_site_gallery` | notices, people, gallery, বিভাগীয় প্রধান, মিউজিয়াম; the routine comes from the app |
+| `about.html` | about / history / vision (pages `about`, `history`, `vision`) | `web_site_page` | পাতা |
+| `head.html` | **বিভাগীয় প্রধানের বাণী**: portrait, name, designation, public e-mail, the message | `web_site_head` | বিভাগীয় প্রধান |
+| `teachers.html` | teachers and staff (a curated public list, not the app's user table) | `web_site_people` | শিক্ষক ও কর্মচারী |
+| `notices.html`, `notice.html?id=…` | notice list (category filter, pagination) and one notice | `web_site_notices`, `web_site_notice` | নোটিশ |
+| `routine.html` | **ক্লাস রুটিন**: batch picker, weekly grid (desktop) / day tabs (phone), next 7 days' changes, print | `web_site_routine_batches`, `web_site_routine` | read from the app's own routine tables; the switch is in কন্ট্রোল প্যানেল |
+| `museum.html`, `museum-item.html?id=…` | **মিউজিয়াম**: intro text, category chips + search, grid of specimen labels, one specimen page | `web_site_museum`, `web_site_museum_item`, `web_site_page` (slug `museum`) | মিউজিয়াম; the intro text in পাতা → `museum` |
+| `library.html` | **সেমিনার লাইব্রেরি**: info block, search + category, paged list of books (20 per page, shareable URL) | `web_site_library`, `web_site_library_categories`, `web_site_page` (slug `seminar-library`) | সেমিনার লাইব্রেরি (incl. CSV / Excel import); the info text in পাতা → `seminar-library` |
+| `gallery.html` | albums and photos with a keyboard-friendly lightbox | `web_site_gallery` | গ্যালারি |
+| `downloads.html` | files to download, grouped by category | `web_site_downloads` | ডাউনলোড |
+| `contact.html` | address, phone, e-mail, map link, social links, contact text (page `contact`) | `web_site_settings`, `web_site_page` | কন্ট্রোল প্যানেল, পাতা |
+| `form.html` | the student information form (unchanged; `form.js`, `validate.js`, `style.css`) | `student_web_*` | ফর্মে জমা পড়া তথ্য |
 
-Shared code: `site.js` (header, footer, menu, the Supabase call, loading / empty / error states, maintenance page,
-tiny Markdown renderer), `lib.js` (pure helpers, tested), `pages.js` (one function per page), `site.css`.
-The header and footer are put in by `site.js` (`<header id="site-header">`, `<footer id="site-footer">`).
+Shared code: `site.js` (header with the theme button, footer, menu, the Supabase call, loading / empty / error states, `Site.widget`, maintenance page,
+tiny Markdown renderer), `lib.js` (pure helpers, tested), `pages.js` (one function per page), `site.css` (tokens + components + print).
+The header and footer are put in by `site.js` (`<header id="site-header">`, `<footer id="site-footer">`); `form.html` does not use them.
+
+**What each switch does:** the routine card and page disappear when "public class routine" is off (কন্ট্রোল প্যানেল) and the page shows "রুটিন এখন প্রদর্শিত হচ্ছে না"; the head corner
+disappears from the home page (and `head.html` says so) while the page `head-message` is unpublished or the chosen person is not published; the museum intro and the
+library info block are hidden while their pages are unpublished or empty.
 
 ## Rules the code follows
 - Data is shown with `textContent` / DOM APIs only. There is no `innerHTML`. Page text uses a tiny Markdown subset
@@ -31,17 +39,26 @@ The header and footer are put in by `site.js` (`<header id="site-header">`, `<fo
 - File links are built only from checked storage paths (`lib.js: fileUrl`).
 - Every request has a timeout (15 s) and a Bangla error with a "try again" button; nothing spins forever.
 - When the admin switches **maintenance mode** on, every page shows the maintenance page (the student form is not affected).
-- Light and dark mode follow the device; touch targets are at least 44 px; layouts are built mobile-first (360 px up to wide screens).
+- **Day / Night / Auto theme** (button in the header, kept in `localStorage` as `site-theme`): an identical inline script in the `<head>` of every public page (not `form.html`) sets `data-theme` before the first paint; Auto follows the device and reacts when it changes. Colours are tokens at the top of `site.css`; every pair is checked for WCAG AA.
+- Touch targets are at least 44 px; layouts are built mobile-first (360 px up to wide screens); one calm reveal animation on the home hero, none at all with "reduce motion".
+- **Design:** see `docs/DESIGN.md` (identity, tokens, type scale, layouts, contrast table, limitations).
+
+## Fonts and privacy
+The pages load **Noto Serif Bengali** (headings) and **Hind Siliguri** (text) from Google Fonts (`<link>` with `preconnect` and `display=swap`). Trade-off: the
+visitor's browser then contacts Google's font servers (Google can see the visitor's IP address and browser). If the college prefers no third party, a later option is to
+**self-host** the font files (download the `.woff2` files into a `fonts/` folder, add `@font-face` rules to `site.css`, and delete the `<link>` lines). Until then the
+CSS falls back to `Noto Sans Bengali`, `Nirmala UI`, `Vrinda` and system fonts, so the site stays readable offline or when the fonts are blocked. `form.html` keeps its own font link.
 
 ## 1. Config (the only place with the URL and the key)
 `config.js` holds the Supabase URL and the **publishable** key (`sb_publishable_…`). Never put the `service_role` or any secret key
 in this folder.
 
 ## 2. Database
-Run these migrations of the app repository once, in order, in the Supabase SQL Editor:
+Run these migrations of the app repository once, in order, in the Supabase SQL Editor (migration 64 is needed for the head corner, routine, museum and library pages):
 1. `20261201000100_student_web_submissions.sql` (student form)
 2. `20261202000100_site_content.sql` (website content: notices, people, gallery, downloads, pages, settings, public bucket `site-public`)
 3. `20261203000100_site_control.sql` (migration 63: admin-only get/set of the student-form settings; needed only for the form switch and limits in the control panel)
+4. `20261204000100_site_more.sql` (migration 64: head corner, museum, seminar library and public routine functions)
 
 ## 3. Publish on GitHub Pages
 Repository **Settings → Pages** → Source: *Deploy from a branch* → branch `main`, folder `/ (root)` → Save.
@@ -57,7 +74,8 @@ anything private there. Allowed: jpg, png, webp, pdf, docx, xlsx; 10 MB each. Pl
 `node test.js` checks `validate.js` (student form rules), `lib.js` (dates, file URLs, link safety, Markdown, paging) and
 `admin/helpers.js` (file-name and path builder, file type / size checks, image size maths, Dhaka time <-> UTC, form -> payload, routes) and the student import
 (CSV reader, heading aliases, cell rules, row checks, error mapping, menu / route wiring).
-To look at the site locally: `python -m http.server` in this folder, then open `http://localhost:8000/`.
+`node test.js` also checks the new pure helpers (dates, routine grouping, current period, theme, library URL state, museum filter), the inline theme script (run in a sandbox), the colour contrast of `site.css` (`node docs/contrast-report.js` prints the table), the wiring of every page, and a **page smoke test** (`test-dom.js`: a tiny fake DOM and fake answers shaped like the database contracts in `test-fixtures.js`) that renders each page, the hidden / error / maintenance cases and the search, pager and tab interactions.
+The tests need Node.js (any recent version). To look at the site locally: `python -m http.server` in this folder, then open `http://localhost:8000/`.
 
 ## Admin panel (`admin/index.html`)
 Open `<site>/admin/` (for example `https://<user>.github.io/<repo>/admin/`). It is a single page with hash links (`#/notices` ...);
@@ -125,9 +143,8 @@ the same students). Leaving the page while it runs asks for confirmation.
 are listed with a short Bangla reason (unknown errors show a generic text, never SQL). The result screen shows created / updated / unchanged / failed counts and the failed rows; the button
 "ব্যর্থ সারিগুলো CSV করে নামান" gives a CSV (original cells + reason + file row number) that can be fixed and imported again. That CSV contains private student data – keep it safe.
 
-## Head corner, museum, seminar library, public routine (Task 53; database migration 64 `20261204000100_site_more.sql`)
-These are the **admin side only**: the public pages that show them are a later task (Task 54). Nothing is visible on the public site until the
-public pages call the new `web_site_*` functions. Run migration 64 in the Supabase SQL Editor first, otherwise these sections say "এই সুবিধা ডাটাবেসে এখনো চালু হয়নি".
+## Head corner, museum, seminar library, public routine (Tasks 53 + 54; database migration 64 `20261204000100_site_more.sql`)
+The public pages for these (`head.html`, `routine.html`, `museum.html`, `museum-item.html`, `library.html`, plus the home page) were added in Task 54 and read them through the `web_site_*` functions of migration 64. Run migration 64 first; otherwise these admin sections say "এই সুবিধা ডাটাবেসে এখনো চালু হয়নি" and the public pages show their empty states.
 
 - **বিভাগীয় প্রধান** (`#/head`): one call (`site_head_set`) saves the person, the title, the message and the publish switch together. The corner is public only while the page is
   published **and** the chosen person is published in "শিক্ষক ও কর্মচারী". The message text is stored in the page `head-message`; the chosen person in the setting `site.head_person_id`.
@@ -136,7 +153,7 @@ public pages call the new `web_site_*` functions. Run migration 64 in the Supaba
 - **সেমিনার লাইব্রেরি** (`#/library`): a public catalogue of the department's books, journals and theses. It is **not** the app's lending library: it has no members, loans or fines.
   Limits: title 300, author 200, publisher 200, category 60, shelf 40, note 300, accession no 40 (unique, any letter case), year 1500–2100, copies 0–999.
   The note is public – do not write internal remarks there.
-- **Public class routine**: the website will show the routine of the app's own tables (the same slots, teachers, rooms and substitute / cancelled classes as the app), for the active batches.
+- **Public class routine**: the website shows the routine of the app's own tables (the same slots, teachers, rooms and substitute / cancelled classes as the app), for the active batches.
   The switch is in "কন্ট্রোল প্যানেল" (`site.routine_public`, default on). Teacher phone numbers, e-mails, ids and the reason of a cancellation are never public.
 
 ### Library import (`#/library/import`)

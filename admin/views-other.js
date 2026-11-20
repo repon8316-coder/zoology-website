@@ -13,10 +13,11 @@
       A.loading(host);
       return Promise.all([
         settle(A.call("student_submission_counts")), settle(A.call("site_notice_list")), settle(A.call("site_person_list")),
-        settle(A.call("site_gallery_list")), settle(A.call("site_download_list")), settle(A.call("site_page_list")), settle(A.call("site_settings_list"))
+        settle(A.call("site_gallery_list")), settle(A.call("site_download_list")), settle(A.call("site_page_list")), settle(A.call("site_settings_list")),
+        settle(A.call("site_museum_list")), settle(A.call("site_library_list", { p_q: null, p_limit: 1, p_offset: 0 }))
       ]).then(function (r) {
         if (!alive()) return;
-        var counts = r[0], lists = { notices: r[1], people: r[2], gallery: r[3], downloads: r[4], pages: r[5] }, settings = r[6];
+        var counts = r[0], lists = { notices: r[1], people: r[2], gallery: r[3], downloads: r[4], pages: r[5] }, settings = r[6], museum = r[7], library = r[8];
         clear(host).appendChild(A.pageTitle("ড্যাশবোর্ড"));
         if (settings.v && A.setMaintenance) A.setMaintenance(settings.v["site.maintenance_mode"] === true);
         if (r.every(function (x) { return x.e; })) { A.failed(host, r[0].e, load); return; }
@@ -41,7 +42,9 @@
           card("শিক্ষক ও কর্মচারী", lists.people, "#/people", pubLines("সদস্য")),
           card("গ্যালারি", lists.gallery, "#/gallery", pubLines("ছবি")),
           card("ডাউনলোড", lists.downloads, "#/downloads", pubLines("ফাইল")),
-          card("পাতা", lists.pages, "#/pages", pubLines("পাতা"))
+          card("পাতা", lists.pages, "#/pages", pubLines("পাতা")),
+          card("মিউজিয়াম", museum, "#/museum", pubLines("আইটেম")),
+          card("সেমিনার লাইব্রেরি", library, "#/library", function (v) { return ["মোট বই: " + bn(v.total)]; })
         ]);
         host.appendChild(grid);
         if (counts.v && counts.v.pending > 0) {
@@ -276,6 +279,8 @@
         host.appendChild(siteSettingsCard(settings));
         host.appendChild(maintenanceCard(settings, load));
         host.appendChild(formCard(r[1], load));
+        host.appendChild(routineCard(settings, load));
+        host.appendChild(linksCard());
         host.appendChild(healthCard(r.slice(2)));
       });
     }
@@ -383,6 +388,36 @@
     });
     card.appendChild(form);
     return card;
+  }
+
+  // The public class routine: one switch. The routine itself is the app's routine (nothing is typed twice).
+  function routineCard(settings, reload) {
+    var on = settings["site.routine_public"] !== false;   // a missing value counts as "shown"
+    return el("section", { class: "card" }, [
+      el("h2", { class: "h3", text: "পাবলিক ক্লাস রুটিন" }),
+      el("p", null, ["এখন: ", A.badge(on ? "ওয়েবসাইটে দেখা যাবে" : "বন্ধ — ওয়েবসাইটে দেখা যাবে না", on ? "badge-ok" : "badge-pin")]),
+      el("p", { class: "muted", text: "চালু থাকলে ভিজিটররা ব্যাচ বেছে সাপ্তাহিক ক্লাস রুটিন দেখতে পাবে: কোন দিন, কোন পিরিয়ডে, কী বিষয়, কোন শিক্ষক ও কোন কক্ষ; সাথে আজ থেকে পরবর্তী ৭ দিনের বাতিল বা বদলি ক্লাস। রুটিন অ্যাপে যেমন আছে সাইটে ঠিক তেমনই দেখাবে — আলাদা করে কিছু লিখতে হয় না। শিক্ষকের মোবাইল, ইমেইল বা অন্য কোনো ব্যক্তিগত তথ্য, এমনকি বাতিলের কারণও কখনো দেখানো হয় না। বন্ধ করলে ভিজিটররা রুটিনের জায়গায় কিছুই পাবে না।" }),
+      A.btn(on ? "রুটিন লুকান" : "রুটিন দেখান", on ? "btn-danger-outline" : "", function (b) {
+        A.confirm({ title: on ? "পাবলিক রুটিন বন্ধ করবেন?" : "পাবলিক রুটিন চালু করবেন?", message: on ? "এখনই ভিজিটররা আর রুটিন দেখতে পাবে না।" : "এখনই ভিজিটররা ব্যাচ বেছে রুটিন দেখতে পাবে।",
+          ok: on ? "হ্যাঁ, বন্ধ করুন" : "হ্যাঁ, চালু করুন", danger: on }).then(function (ok) {
+          if (!ok) return;
+          return A.run(b, function () {
+            return A.call("site_settings_set", { p_key: "site.routine_public", p_value: !on }).then(function () { A.toast(on ? "পাবলিক রুটিন বন্ধ করা হয়েছে" : "পাবলিক রুটিন চালু হয়েছে"); return reload(); });
+          });
+        });
+      })
+    ]);
+  }
+
+  function linksCard() {
+    return el("section", { class: "card" }, [
+      el("h2", { class: "h3", text: "অন্যান্য অংশের লেখা বদলান" }),
+      el("ul", { class: "plain" }, [
+        el("li", null, [el("a", { href: "#/pages/museum", text: "মিউজিয়ামের ভূমিকা" }), " — মিউজিয়াম পাতার উপরের লেখা"]),
+        el("li", null, [el("a", { href: "#/pages/seminar-library", text: "সেমিনার লাইব্রেরির তথ্য" }), " — খোলা থাকার সময়, নিয়ম ও যোগাযোগ"]),
+        el("li", null, [el("a", { href: "#/head", text: "বিভাগীয় প্রধানের বাণী" }), " — ব্যক্তি বাছা, বাণী লেখা ও প্রকাশ"])
+      ])
+    ]);
   }
 
   function healthCard(r) {

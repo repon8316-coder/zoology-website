@@ -37,6 +37,9 @@
     return [mk(-1, "↑", "উপরে তুলুন"), mk(1, "↓", "নিচে নামান")];
   }
 
+  // shared with the other admin files (views-site.js, views-library.js)
+  A.ui = { go: go, norm: norm, backLink: backLink, fileLink: fileLink, toggleBtn: toggleBtn, reorderBtns: reorderBtns };
+
   // ======================= NOTICES =======================
   function noticeStatus(n, now) {
     if (!n.is_published) return "draft";
@@ -440,8 +443,9 @@
   };
 
   // ======================= PAGES =======================
-  var CORE_SLUGS = ["about", "history", "vision", "contact"];
-  var SLUG_NAMES = { about: "পরিচিতি", history: "ইতিহাস", vision: "লক্ষ্য ও উদ্দেশ্য", contact: "যোগাযোগ" };
+  var CORE_SLUGS = ["about", "history", "vision", "contact", "head-message", "seminar-library", "museum"];   // never deletable here
+  var SLUG_NAMES = { about: "পরিচিতি", history: "ইতিহাস", vision: "লক্ষ্য ও উদ্দেশ্য", contact: "যোগাযোগ",
+    "head-message": "বিভাগীয় প্রধানের বাণী", "seminar-library": "সেমিনার লাইব্রেরি", museum: "মিউজিয়াম" };
 
   V.pages = function (host, arg, alive) {
     if (arg) return pageForm(host, arg, alive);

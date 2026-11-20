@@ -9,7 +9,7 @@
   var MB = 1024 * 1024;
   var MAX_BYTES = 10 * MB;
   var MAX_EDGE = 1600;
-  var AREAS = ["notices", "people", "gallery", "downloads", "pages"];
+  var AREAS = ["notices", "people", "gallery", "downloads", "pages", "museum"];
 
   // extension -> {kind, mime}
   var TYPES = {
@@ -236,7 +236,7 @@
   }
 
   // ---------------- routing ----------------
-  var ROUTES = ["dashboard", "notices", "people", "gallery", "downloads", "pages", "submissions", "import", "control"];
+  var ROUTES = ["dashboard", "notices", "people", "head", "gallery", "downloads", "museum", "library", "pages", "submissions", "import", "control"];
 
   // "#/notices/new" -> {name:"notices", arg:"new"}; unknown or empty -> dashboard. Nothing from the hash is trusted further.
   function parseRoute(hash) {
@@ -343,12 +343,13 @@
     "address_village", "address_post", "address_thana", "address_zila", "status", "admission_date"];
 
   // headings -> {fieldKey: columnIndex}. Exact names first, then the longest known name contained in a heading.
-  function autoMapHeaders(headers) {
+  // `fields` = a list of {key, keys:[comparable names]} (the student list by default; the library import has its own).
+  function mapHeaders(headers, fields) {
     var result = {}, used = {}, keys = (headers || []).map(importKey), i, j, k, f;
     for (i = 0; i < keys.length; i++) {
       if (!keys[i]) continue;
-      for (j = 0; j < IMPORT_FIELDS.length; j++) {
-        f = IMPORT_FIELDS[j];
+      for (j = 0; j < fields.length; j++) {
+        f = fields[j];
         if (!(f.key in result) && f.keys.indexOf(keys[i]) >= 0) { result[f.key] = i; used[i] = true; break; }
       }
     }
@@ -356,8 +357,8 @@
       var h = String(headers[i] == null ? "" : headers[i]);
       if (!keys[i] || keys[i].length > 40 || h.trim().split(/\s+/).length > 5 || h.indexOf("।") >= 0 || used[i]) continue;   // a sentence is not a heading
       var best = null, bestLen = 2;
-      for (j = 0; j < IMPORT_FIELDS.length; j++) {
-        f = IMPORT_FIELDS[j];
+      for (j = 0; j < fields.length; j++) {
+        f = fields[j];
         if (f.key in result) continue;
         for (k = 0; k < f.keys.length; k++) if (f.keys[k].length > bestLen && keys[i].indexOf(f.keys[k]) >= 0) { best = f; bestLen = f.keys[k].length; }
       }
@@ -365,16 +366,17 @@
     }
     return result;
   }
+  function autoMapHeaders(headers) { return mapHeaders(headers, IMPORT_FIELDS); }
 
   function isBlankRow(cells) {
     for (var i = 0; i < (cells || []).length; i++) if (cleanCell(cells[i])) return false;
     return true;
   }
   // The header row = the one among the first 15 rows that matches the most known headings; else the first non-empty row. -1 if the file is empty.
-  function findHeaderRow(grid) {
+  function findHeaderRow(grid, fields) {
     var best = 0, idx = -1, i;
     for (i = 0; i < grid.length && i < 15; i++) {
-      var n = Object.keys(autoMapHeaders((grid[i] || []).map(cleanCell))).length;
+      var n = Object.keys(mapHeaders((grid[i] || []).map(cleanCell), fields || IMPORT_FIELDS)).length;
       if (n > best) { best = n; idx = i; }
     }
     if (idx < 0) for (i = 0; i < grid.length; i++) if (!isBlankRow(grid[i])) { idx = i; break; }
@@ -745,6 +747,213 @@
     })));
   }
 
+
+  // ======================= head corner, museum, seminar library (Task 53) =======================
+  var UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  function isUuid(s) { return typeof s === "string" && UUID_RE.test(s); }
+  // Postgres length() counts characters; JS .length counts UTF-16 units. Array.from counts characters.
+  function chars(s) { return Array.from(String(s == null ? "" : s)).length; }
+  function strN(v) { return v == null ? "" : String(v).replace(/\s+/g, " ").trim(); }       // one line, spaces collapsed (the server does the same)
+  function textN(v) { return v == null ? "" : String(v).replace(/\r/g, "").trim(); }          // many lines
+
+  var HEAD_TITLE_MAX = 200, HEAD_BODY_MAX = 6000;
+  // f: {person_id, title, body_md, publish} -> {args:{p_person_id, p_title, p_body_md, p_publish}} or {error}
+  function headToArgs(f) {
+    f = f || {};
+    var person = str(f.person_id), title = strN(f.title), body = textN(f.body_md);
+    if (person && !isUuid(person)) return { error: "ব্যক্তি বাছাই ঠিক নেই" };
+    if (!title) return { error: "শিরোনাম লিখুন" };
+    if (chars(title) > HEAD_TITLE_MAX) return { error: "শিরোনাম ২০০ অক্ষরের বেশি হবে না" };
+    if (chars(body) > HEAD_BODY_MAX) return { error: "বাণী ৬০০০ অক্ষরের বেশি হবে না" };
+    if (f.publish && !person) return { error: "প্রকাশ করার আগে বিভাগীয় প্রধান বেছে নিন" };
+    return { args: { p_person_id: person || null, p_title: title, p_body_md: body, p_publish: !!f.publish } };
+  }
+
+  // "2026-11-20" valid, not before 1800, not after todayIso ("YYYY-MM-DD", the Dhaka date)
+  function isoDateOk(s, todayIso) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s || ""));
+    if (!m) return false;
+    var y = +m[1], mo = +m[2], d = +m[3], dt = new Date(Date.UTC(y, mo - 1, d));
+    if (y < 1800 || dt.getUTCFullYear() !== y || dt.getUTCMonth() !== mo - 1 || dt.getUTCDate() !== d) return false;
+    return !todayIso || String(s) <= String(todayIso);
+  }
+  function dhakaToday(now) { return nowDhakaLocal(now).slice(0, 10); }
+
+  var MUSEUM_MAX = { title_bn: 200, title_en: 200, scientific_name: 200, category: 60, catalog_no: 40, description: 3000, collected_from: 200 };
+  // f: the form values -> {payload} or {error}. opts.today = the Dhaka date "YYYY-MM-DD" (default: now).
+  function museumToPayload(f, opts) {
+    f = f || {};
+    var today = (opts && opts.today) || dhakaToday();
+    var p = {
+      title_bn: strN(f.title_bn), title_en: strN(f.title_en), scientific_name: strN(f.scientific_name), category: strN(f.category),
+      catalog_no: strN(f.catalog_no) || null, description: textN(f.description), collected_from: strN(f.collected_from),
+      collected_on: str(f.collected_on) || null, photo_path: f.photo_path || null, is_published: !!f.is_published
+    };
+    if (!p.title_bn) return { error: "নাম (বাংলা) লিখুন" };
+    if (chars(p.title_bn) > MUSEUM_MAX.title_bn) return { error: "নাম ২০০ অক্ষরের বেশি হবে না" };
+    if (chars(p.title_en) > MUSEUM_MAX.title_en) return { error: "ইংরেজি নাম ২০০ অক্ষরের বেশি হবে না" };
+    if (chars(p.scientific_name) > MUSEUM_MAX.scientific_name) return { error: "বৈজ্ঞানিক নাম ২০০ অক্ষরের বেশি হবে না" };
+    if (chars(p.category) > MUSEUM_MAX.category) return { error: "বিভাগের নাম ৬০ অক্ষরের বেশি হবে না" };
+    if (p.catalog_no && chars(p.catalog_no) > MUSEUM_MAX.catalog_no) return { error: "ক্যাটালগ নম্বর ৪০ অক্ষরের বেশি হবে না" };
+    if (chars(p.description) > MUSEUM_MAX.description) return { error: "বিবরণ ৩০০০ অক্ষরের বেশি হবে না" };
+    if (chars(p.collected_from) > MUSEUM_MAX.collected_from) return { error: "সংগ্রহের স্থান ২০০ অক্ষরের বেশি হবে না" };
+    if (p.collected_on && !isoDateOk(p.collected_on, today)) return { error: "সংগ্রহের তারিখ ঠিক নেই (আজকের পরের তারিখ চলবে না)" };
+    if (p.photo_path && !isValidPath(p.photo_path)) return { error: "ছবির পথ ঠিক নেই" };
+    if (f.id) p.id = f.id;
+    if (f.sort_order != null && f.sort_order !== "") p.sort_order = +f.sort_order;
+    return { payload: p };
+  }
+
+  var LIB_MAX = { title: 300, author: 200, publisher: 200, category: 60, shelf: 40, note: 300, accession_no: 40 };
+  var LIB_YEAR_MIN = 1500, LIB_YEAR_MAX = 2100, LIB_COPIES_MAX = 999;
+  function wholeNumber(s) {
+    var t = asciiDigits(String(s == null ? "" : s)).trim();
+    if (/^\d+\.0+$/.test(t)) t = t.replace(/\.0+$/, "");     // an Excel number cell: "2015.0"
+    return /^\d{1,9}$/.test(t) ? +t : null;
+  }
+  // f: the form values -> {payload} or {error}. Empty year = none; empty copies = 1.
+  function libraryToPayload(f) {
+    f = f || {};
+    var p = { title: strN(f.title), author: strN(f.author), category: strN(f.category), publisher: strN(f.publisher), shelf: strN(f.shelf), note: strN(f.note),
+      accession_no: strN(f.accession_no) || null, is_published: !!f.is_published };
+    if (!p.title) return { error: "শিরোনাম লিখুন" };
+    if (chars(p.title) > LIB_MAX.title) return { error: "শিরোনাম ৩০০ অক্ষরের বেশি হবে না" };
+    if (chars(p.author) > LIB_MAX.author) return { error: "লেখকের নাম ২০০ অক্ষরের বেশি হবে না" };
+    if (chars(p.publisher) > LIB_MAX.publisher) return { error: "প্রকাশকের নাম ২০০ অক্ষরের বেশি হবে না" };
+    if (chars(p.category) > LIB_MAX.category) return { error: "বিভাগের নাম ৬০ অক্ষরের বেশি হবে না" };
+    if (chars(p.shelf) > LIB_MAX.shelf) return { error: "তাকের নাম ৪০ অক্ষরের বেশি হবে না" };
+    if (chars(p.note) > LIB_MAX.note) return { error: "মন্তব্য ৩০০ অক্ষরের বেশি হবে না" };
+    if (p.accession_no && chars(p.accession_no) > LIB_MAX.accession_no) return { error: "সংগ্রহ নম্বর ৪০ অক্ষরের বেশি হবে না" };
+    var y = str(f.edition_year);
+    if (y === "") p.edition_year = null;
+    else {
+      var yn = wholeNumber(y);
+      if (yn == null || yn < LIB_YEAR_MIN || yn > LIB_YEAR_MAX) return { error: "প্রকাশের সাল ১৫০০ থেকে ২১০০ এর মধ্যে হতে হবে" };
+      p.edition_year = yn;
+    }
+    var c = str(f.copies);
+    if (c === "") p.copies = 1;
+    else {
+      var cn = wholeNumber(c);
+      if (cn == null || cn > LIB_COPIES_MAX) return { error: "কপির সংখ্যা ০ থেকে ৯৯৯ এর মধ্যে হতে হবে" };
+      p.copies = cn;
+    }
+    if (f.id) p.id = f.id;
+    return { payload: p };
+  }
+
+  // ---- library import: headings, rows, template, failed rows ----
+  var LIB_FIELDS = [
+    { key: "title", bn: "শিরোনাম", en: "Title", aliases: ["বইয়ের নাম", "বইএর নাম", "বইয়ের শিরোনাম", "book title", "book name", "name", "নাম"] },
+    { key: "author", bn: "লেখক", en: "Author", aliases: ["লেখকের নাম", "লেখক/সম্পাদক", "writer", "authors"] },
+    { key: "category", bn: "বিভাগ", en: "Category", aliases: ["ধরন", "ক্যাটাগরি", "বিষয়", "subject", "type"] },
+    { key: "publisher", bn: "প্রকাশক", en: "Publisher", aliases: ["প্রকাশনী", "প্রকাশকের নাম"] },
+    { key: "edition_year", bn: "প্রকাশের সাল", en: "Edition Year", aliases: ["সাল", "প্রকাশকাল", "সংস্করণের সাল", "বছর", "year", "publication year", "year of publication", "edition"] },
+    { key: "accession_no", bn: "সংগ্রহ নম্বর", en: "Accession No", aliases: ["সংগ্রহ নং", "এক্সেশন নং", "এক্সেশন নম্বর", "accession number", "accession", "acc no", "acc"] },
+    { key: "shelf", bn: "তাক", en: "Shelf", aliases: ["তাকের নাম", "অবস্থান", "location", "rack"] },
+    { key: "copies", bn: "কপি", en: "Copies", aliases: ["কপির সংখ্যা", "সংখ্যা", "copy", "quantity", "qty", "no of copies"] },
+    { key: "note", bn: "মন্তব্য", en: "Note", aliases: ["নোট", "remarks", "remark", "comment"] }
+  ];
+  var LIB_BY_KEY = {};
+  LIB_FIELDS.forEach(function (f) { LIB_BY_KEY[f.key] = f; f.keys = [f.bn, f.en].concat(f.aliases).map(importKey); });
+  var LIB_TEMPLATE_KEYS = LIB_FIELDS.map(function (f) { return f.key; });
+  var LIB_IMPORT_MAX_ROWS = 2000, LIB_IMPORT_CHUNK = 200;
+
+  function autoMapLibHeaders(headers) { return mapHeaders(headers, LIB_FIELDS); }
+  function findLibHeaderRow(grid) { return findHeaderRow(grid, LIB_FIELDS); }
+
+  // grid: array of rows of strings. mapping: from autoMapLibHeaders.
+  // Returns {rows:[{rowNumber, title, accession, ok, issues:[{error, code, field, msg}], payload, raw}]}.
+  // payload = one row for public.site_library_import (empty cells are left out; the server keeps the old value for them).
+  function buildLibraryRows(grid, headerIdx, mapping) {
+    var rows = [], byAcc = {}, gi;
+    function oneRow(cells, rowNumber) {
+      var issues = [], vals = {}, raw = {};
+      function text(k) { return mapping[k] == null ? "" : cleanCell(cells[mapping[k]]); }
+      function err(code, field, msg) { issues.push({ error: true, code: code, field: field, msg: msg }); }
+      Object.keys(mapping).forEach(function (k) { var t = text(k); if (t) raw[k] = t; });
+
+      var title = text("title");
+      if (!title) err("missing_title", "title", "শিরোনাম নেই");
+      else if (chars(title) > LIB_MAX.title) err("too_long", "title", "শিরোনাম ৩০০ অক্ষরের বেশি");
+      else vals.title = title;
+      [["author", "লেখকের নাম"], ["publisher", "প্রকাশকের নাম"], ["category", "বিভাগের নাম"], ["shelf", "তাকের নাম"], ["note", "মন্তব্য"]].forEach(function (pair) {
+        var t = text(pair[0]);
+        if (!t) return;
+        if (chars(t) > LIB_MAX[pair[0]]) err("too_long", pair[0], pair[1] + " " + bn(LIB_MAX[pair[0]]) + " অক্ষরের বেশি");
+        else vals[pair[0]] = t;
+      });
+      var acc = text("accession_no");
+      if (acc) {
+        if (chars(acc) > LIB_MAX.accession_no) err("too_long", "accession_no", "সংগ্রহ নম্বর ৪০ অক্ষরের বেশি");
+        else vals.accession_no = acc;
+      }
+      var yt = text("edition_year");
+      if (yt) {
+        var yn = wholeNumber(yt);
+        if (yn == null || yn < LIB_YEAR_MIN || yn > LIB_YEAR_MAX) err("bad_year", "edition_year", "প্রকাশের সাল সঠিক নয় (১৫০০–২১০০): " + yt);
+        else vals.edition_year = yn;
+      }
+      var ct = text("copies");
+      if (ct) {
+        var cn = wholeNumber(ct);
+        if (cn == null || cn > LIB_COPIES_MAX) err("bad_copies", "copies", "কপির সংখ্যা সঠিক নয় (০–৯৯৯): " + ct);
+        else vals.copies = cn;
+      }
+      var payload = { row: rowNumber };
+      Object.keys(vals).forEach(function (k) { payload[k] = vals[k]; });
+      var r = { rowNumber: rowNumber, title: title, accession: acc, issues: issues, payload: payload, raw: raw };
+      if (acc) (byAcc[acc.toLowerCase()] = byAcc[acc.toLowerCase()] || []).push(r);
+      return r;
+    }
+    for (gi = headerIdx + 1; gi < grid.length; gi++) {
+      var cells = grid[gi] || [];
+      if (isBlankRow(cells)) continue;
+      rows.push(oneRow(cells, gi + 1));
+    }
+    // the same accession number twice in one file: all those rows are refused (the person decides which one is right)
+    Object.keys(byAcc).forEach(function (k) {
+      var g = byAcc[k];
+      if (g.length < 2) return;
+      g.forEach(function (r) {
+        var others = g.filter(function (o) { return o !== r; }).map(function (o) { return o.rowNumber; });
+        r.issues.push({ error: true, code: "dup_in_file", field: "accession_no", msg: "এই সংগ্রহ নম্বর ফাইলে একাধিকবার আছে (" + rowsBn(others) + ")" });
+      });
+    });
+    rows.forEach(function (r) { r.ok = !r.issues.some(function (i) { return i.error; }); });
+    return { rows: rows };
+  }
+
+  // One server answer for one library row -> a short Bangla reason. Only the stable code is used; SQL text is never shown.
+  var LIB_ERR_BN = {
+    lib_title_required: "শিরোনাম নেই",
+    lib_too_long: "কোনো ঘরের লেখা অতিরিক্ত লম্বা",
+    lib_bad_year: "প্রকাশের সাল ১৫০০ থেকে ২১০০ এর মধ্যে হতে হবে",
+    lib_bad_copies: "কপির সংখ্যা ০ থেকে ৯৯৯ এর মধ্যে হতে হবে",
+    lib_bad_number: "সংখ্যার ঘরে সংখ্যা নেই",
+    lib_dup_accession: "এই সংগ্রহ নম্বর অন্য বইয়ের আছে",
+    lib_bad_publish: "প্রকাশের মান ঠিক নেই",
+    lib_bad_row: "সারির তথ্য ঠিক নেই"
+  };
+  function libImportErrorBn(item) {
+    var code = String(item && item.code || "");
+    return Object.prototype.hasOwnProperty.call(LIB_ERR_BN, code) ? LIB_ERR_BN[code] : "এই সারিটি যুক্ত করা যায়নি";
+  }
+
+  var LIB_TEMPLATE_HEADS = LIB_TEMPLATE_KEYS.map(function (k) { return LIB_BY_KEY[k].bn; });
+  function libraryTemplateCsv() {
+    var a = { title: "নমুনা বই এক", author: "নমুনা লেখক", category: "পাঠ্যবই", publisher: "নমুনা প্রকাশনী", edition_year: "2015", accession_no: "SAMPLE-001", shelf: "ক-১", copies: "2", note: "" };
+    var b = { title: "Sample Book Two", author: "Sample Author", category: "জার্নাল", publisher: "", edition_year: "", accession_no: "SAMPLE-002", shelf: "", copies: "1", note: "নমুনা মন্তব্য" };
+    return toCsv([LIB_TEMPLATE_HEADS].concat([a, b].map(function (o) { return LIB_TEMPLATE_KEYS.map(function (k) { return o[k] || ""; }); })));
+  }
+  // items: [{rowNumber, raw, reason}] -> CSV with the template headings + reason + file row. Fix and upload again.
+  function libFailedRowsCsv(items) {
+    var head = LIB_TEMPLATE_HEADS.concat(["ত্রুটির কারণ", "ফাইলের সারি"]);
+    return toCsv([head].concat(items.map(function (i) {
+      return LIB_TEMPLATE_KEYS.map(function (k) { return (i.raw && i.raw[k]) || ""; }).concat([i.reason || "", String(i.rowNumber)]);
+    })));
+  }
+
   return {
     IMPORT_MAX_BYTES: IMPORT_MAX_BYTES, IMPORT_MAX_ROWS: IMPORT_MAX_ROWS, IMPORT_CHUNK: IMPORT_CHUNK, IMPORT_FIELDS: IMPORT_FIELDS, IMPORT_TEMPLATE_KEYS: IMPORT_TEMPLATE_KEYS,
     importKey: importKey, cleanCell: cleanCell, normMobile: normMobile, autoMapHeaders: autoMapHeaders, findHeaderRow: findHeaderRow, countDataRows: countDataRows,
@@ -759,6 +968,11 @@
     noticeToPayload: noticeToPayload, personToPayload: personToPayload, galleryToPayload: galleryToPayload,
     downloadToPayload: downloadToPayload, pageToPayload: pageToPayload, isValidSlug: isValidSlug,
     submissionToForm: submissionToForm, formToSubmission: formToSubmission, parseRoute: parseRoute,
-    moveItem: moveItem, fileKey: fileKey, uniqueValues: uniqueValues, uploadSummary: uploadSummary
+    moveItem: moveItem, fileKey: fileKey, uniqueValues: uniqueValues, uploadSummary: uploadSummary,
+    isUuid: isUuid, chars: chars, headToArgs: headToArgs, HEAD_BODY_MAX: HEAD_BODY_MAX, isoDateOk: isoDateOk, dhakaToday: dhakaToday,
+    museumToPayload: museumToPayload, MUSEUM_MAX: MUSEUM_MAX, libraryToPayload: libraryToPayload, LIB_MAX: LIB_MAX,
+    LIB_FIELDS: LIB_FIELDS, LIB_TEMPLATE_KEYS: LIB_TEMPLATE_KEYS, LIB_IMPORT_MAX_ROWS: LIB_IMPORT_MAX_ROWS, LIB_IMPORT_CHUNK: LIB_IMPORT_CHUNK,
+    mapHeaders: mapHeaders, autoMapLibHeaders: autoMapLibHeaders, findLibHeaderRow: findLibHeaderRow, buildLibraryRows: buildLibraryRows,
+    libImportErrorBn: libImportErrorBn, libraryTemplateCsv: libraryTemplateCsv, libFailedRowsCsv: libFailedRowsCsv
   };
 });

@@ -75,17 +75,20 @@ The password is never stored, logged or put in a URL.
 | ড্যাশবোর্ড | counts of submissions, notices, people, photos, downloads, pages; quick links; a banner while maintenance mode is on |
 | নোটিশ | search + status filter; create / edit with a live preview (same safe renderer as the public site), publish / expiry time (Dhaka time), pinned, attachment (replace / remove); publish / hide; delete |
 | শিক্ষক ও কর্মচারী | add / edit (photo with preview), publish / hide, ↑ ↓ reorder, delete |
+| বিভাগীয় প্রধান | choose the head from the published people, write the message (Markdown + live preview, 6000 characters), publish switch; tells you when the corner is not visible and why |
 | গ্যালারি | many photos at once into an album; per-photo title, caption, album, publish; ↑ ↓ reorder; delete |
 | ডাউনলোড | many files at once; title, category, publish; shows size; ↑ ↓ reorder; delete |
+| মিউজিয়াম | list with search + category filter; add / edit (Bangla and English name, scientific name, category with suggestions, catalog no, place and date of collection, text, one photo), publish / hide, ↑ ↓ reorder, delete |
+| সেমিনার লাইব্রেরি | book list with search and pages; add / edit / delete one book; **import from CSV / Excel** (see below); link to the info page (opening hours, rules, contact) |
 | পাতা | edit about / history / vision / contact (Markdown subset with live preview); create a page with a new slug (lowercase letters, digits, `-`) |
 | ফর্মে জমা পড়া তথ্য | pending / approved / rejected, search, detail + fix typos, accept (automatic batch or pick one), reject with a reason, accept all |
 | শিক্ষার্থী ইমপোর্ট | CSV / Excel file -> students in the database (see "Student import" below) |
-| কন্ট্রোল প্যানেল | site name / address / phone / e-mail / links; maintenance mode (with confirm); student form open / closed + the two rate limits; read-only "site health" |
+| কন্ট্রোল প্যানেল | site name / address / phone / e-mail / links; maintenance mode (with confirm); student form open / closed + the two rate limits; **public class routine on / off**; links to the museum, library and head-message texts; read-only "site health" |
 
 **Upload rules** (bucket `site-public`, admin session)
 - Allowed: jpg, png, webp (images) and pdf, docx, xlsx (files); 10 MB each. The real file bytes are checked, not only the name.
 - Images are shrunk in the browser to at most 1600 px (webp, quality about 0.82; jpeg if webp is not available). A small image is kept as it is.
-- Stored as `<area>/<yyyymm>/<uuid>-<ascii-name>.<ext>` where area is `notices | people | gallery | downloads | pages`. The original name is never used as a path.
+- Stored as `<area>/<yyyymm>/<uuid>-<ascii-name>.<ext>` where area is `notices | people | gallery | downloads | pages | museum`. The original name is never used as a path.
 - Order of work: upload -> save the row -> (on failure the new file is deleted again). Old / deleted files are removed from the bucket only after the database call worked; if that cleanup fails you get a gentle warning.
 - Many files: each file shows its own result, a failed file does not stop the rest, a summary is shown, and a file that was already added is not added twice on retry.
 
@@ -121,6 +124,34 @@ the same students). Leaving the page while it runs asks for confirmation.
 **Errors:** problems found locally (missing / duplicate registration no, bad mobile / date / gender / blood group / session / program ...) keep that row out of the import. Rows refused by the server
 are listed with a short Bangla reason (unknown errors show a generic text, never SQL). The result screen shows created / updated / unchanged / failed counts and the failed rows; the button
 "ব্যর্থ সারিগুলো CSV করে নামান" gives a CSV (original cells + reason + file row number) that can be fixed and imported again. That CSV contains private student data – keep it safe.
+
+## Head corner, museum, seminar library, public routine (Task 53; database migration 64 `20261204000100_site_more.sql`)
+These are the **admin side only**: the public pages that show them are a later task (Task 54). Nothing is visible on the public site until the
+public pages call the new `web_site_*` functions. Run migration 64 in the Supabase SQL Editor first, otherwise these sections say "এই সুবিধা ডাটাবেসে এখনো চালু হয়নি".
+
+- **বিভাগীয় প্রধান** (`#/head`): one call (`site_head_set`) saves the person, the title, the message and the publish switch together. The corner is public only while the page is
+  published **and** the chosen person is published in "শিক্ষক ও কর্মচারী". The message text is stored in the page `head-message`; the chosen person in the setting `site.head_person_id`.
+- **মিউজিয়াম** (`#/museum`): photo area `museum/` in the public bucket (jpg / png / webp, 10 MB, shrunk to 1600 px like all photos). Catalog numbers must be unique (any letter case).
+  Limits: names 200 characters, category 60, catalog no 40, description 3000, place 200; the date cannot be in the future. ↑ ↓ work only while no search / filter is active.
+- **সেমিনার লাইব্রেরি** (`#/library`): a public catalogue of the department's books, journals and theses. It is **not** the app's lending library: it has no members, loans or fines.
+  Limits: title 300, author 200, publisher 200, category 60, shelf 40, note 300, accession no 40 (unique, any letter case), year 1500–2100, copies 0–999.
+  The note is public – do not write internal remarks there.
+- **Public class routine**: the website will show the routine of the app's own tables (the same slots, teachers, rooms and substitute / cancelled classes as the app), for the active batches.
+  The switch is in "কন্ট্রোল প্যানেল" (`site.routine_public`, default on). Teacher phone numbers, e-mails, ids and the reason of a cancellation are never public.
+
+### Library import (`#/library/import`)
+Same reader as the student import (`admin/sheet.js`; SheetJS is loaded only when an `.xlsx` file is chosen). **Limits:** 5 MB, 2000 data rows, first sheet only; rows go in chunks of 200
+(the database accepts at most 500 per call). Headings in Bangla or English (use "টেমপ্লেট CSV নামান"); only the title is required.
+- A book whose **accession number** already exists is **updated** with the non-empty cells (empty cells keep the old value). Rows **without** an accession number are always added as new books.
+  Because of that, sending the same file twice duplicates the rows that have no accession number.
+- The same accession number twice in one file: both rows are refused before anything is sent.
+- Preview (headings, counts, first 20 rows, error list), a "publish now" tick (default on) and an "I checked" tick come before the start. Network failure: the run **stops** and offers
+  "resume from row N"; if that chunk contains rows without an accession number the page warns that resending can duplicate them.
+- Server answers per row are shown as Bangla texts mapped from a short code; SQL text is never shown. "ব্যর্থ সারিগুলো CSV" gives the failed rows (with the reason and the file row) to fix and upload again.
+
+### Shared files
+`admin/sheet.js` (CSV / Excel reader and CSV download, used by both imports), `admin/views-site.js` (head corner + museum), `admin/views-library.js`, `admin/views-library-import.js`.
+`views-import.js` (students) behaves as before; only its file reader moved into `sheet.js`.
 
 **How to add content:** sign in -> choose the section -> fill the form -> tick "প্রকাশ করুন" -> save. Items stay invisible on the public site until published.
 

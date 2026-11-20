@@ -396,8 +396,196 @@ const fs = require("fs"), path = require("path");
   assert.ok(html.indexOf('src="views-import.js"') > html.indexOf('src="views-other.js"') && html.indexOf('src="views-import.js"') < html.indexOf('src="admin.js"'));
   assert.ok(!/xlsx/i.test(html.replace(/views-import\.js/g, "")));                                            // SheetJS is not loaded on every page
   const impSrc = fs.readFileSync(path.join(__dirname, "admin", "views-import.js"), "utf8");
-  assert.ok(/xlsx@0\.18\.5\/dist\/xlsx\.full\.min\.js/.test(impSrc) && /sha384-[A-Za-z0-9+\/]{64}/.test(impSrc) && /cdn\.jsdelivr\.net\/npm\//.test(impSrc));
-  assert.ok(!/innerHTML|insertAdjacentHTML|document\.write|console\.|service_role|site-public/.test(impSrc));      // no raw HTML, no logging of student data, no public bucket
+  // since Task 53 the SheetJS loader and the file reader live in the shared admin/sheet.js (used by the student import and the library import)
+  const sheetSrc = fs.readFileSync(path.join(__dirname, "admin", "sheet.js"), "utf8");
+  assert.ok(/xlsx@0\.18\.5\/dist\/xlsx\.full\.min\.js/.test(sheetSrc) && /sha384-[A-Za-z0-9+\/]{64}/.test(sheetSrc) && /cdn\.jsdelivr\.net\/npm\//.test(sheetSrc));
+  assert.ok(!/xlsx@|sha384-|createElement\("script"\)/.test(impSrc));                                              // the student import has no loader of its own any more
+  assert.ok(/A\.sheet\.readGrid/.test(impSrc) && /A\.sheet\.download/.test(impSrc));
+  assert.ok(!/innerHTML|insertAdjacentHTML|document\.write|console\.|service_role|site-public/.test(impSrc + sheetSrc));      // no raw HTML, no logging of student data, no public bucket
   assert.ok(/V\["import"\]/.test(impSrc));
+  assert.ok(html.indexOf('src="sheet.js"') > html.indexOf('src="core.js"') && html.indexOf('src="sheet.js"') < html.indexOf('src="views-library-import.js"') && html.indexOf('src="sheet.js"') < html.indexOf('src="views-import.js"'));
 }
 console.log("student import OK");
+
+// ---------------- Task 53: head corner, museum, seminar library (admin helpers + wiring) ----------------
+{
+  const H = require("./admin/helpers.js");
+  const fs = require("fs"), path = require("path");
+  const UU = "123e4567-e89b-42d3-a456-426614174000";
+
+  // upload area + routes
+  assert.ok(H.AREAS.indexOf("museum") >= 0);
+  const mp = H.buildPath("museum", new Date(Date.UTC(2026, 10, 20)), UU, "Photo 1.JPG", "jpg");
+  assert.ok(/^museum\/202611\/123e4567-e89b-42d3-a456-426614174000-[a-z0-9-]+\.jpg$/.test(mp) && H.isValidPath(mp), mp);
+  assert.throws(() => H.buildPath("library", new Date(), UU, "a.jpg", "jpg"));
+  ["head", "museum", "library"].forEach((n) => assert.ok(H.ROUTES.indexOf(n) >= 0, n));
+  assert.deepStrictEqual(H.parseRoute("#/head"), { name: "head", arg: "" });
+  assert.deepStrictEqual(H.parseRoute("#/museum/new"), { name: "museum", arg: "new" });
+  assert.deepStrictEqual(H.parseRoute("#/library/import"), { name: "library", arg: "import" });
+  assert.deepStrictEqual(H.parseRoute("#/library/" + UU), { name: "library", arg: UU });
+  assert.deepStrictEqual(H.parseRoute("#/library/%3Cscript%3E"), { name: "library", arg: "" });       // nothing odd from the hash is trusted
+  assert.deepStrictEqual(H.parseRoute("#/library/a/b"), { name: "library", arg: "a" });
+  assert.deepStrictEqual(H.parseRoute("#/nope"), { name: "dashboard", arg: "" });
+
+  // head corner
+  {
+    const ok = H.headToArgs({ person_id: UU, title: "  বিভাগীয় প্রধানের   বাণী ", body_md: "  # শিরোনাম\r\nলেখা  ", publish: true });
+    assert.deepStrictEqual(ok.args, { p_person_id: UU, p_title: "বিভাগীয় প্রধানের বাণী", p_body_md: "# শিরোনাম\nলেখা", p_publish: true });
+    assert.strictEqual(H.headToArgs({ person_id: "", title: "t", body_md: "", publish: false }).args.p_person_id, null);       // no person is fine while not publishing
+    assert.ok(/প্রধান বেছে নিন/.test(H.headToArgs({ person_id: "", title: "t", body_md: "b", publish: true }).error));        // publishing needs a person
+    assert.ok(H.headToArgs({ person_id: "nope", title: "t" }).error);
+    ["", "   ", null, undefined].forEach((t) => assert.ok(/শিরোনাম লিখুন/.test(H.headToArgs({ person_id: UU, title: t }).error)));
+    assert.ok(H.headToArgs({ person_id: UU, title: "অ".repeat(200) }).args);
+    assert.ok(/২০০/.test(H.headToArgs({ person_id: UU, title: "অ".repeat(201) }).error));
+    assert.ok(H.headToArgs({ person_id: UU, title: "t", body_md: "আ".repeat(6000) }).args);
+    assert.ok(/৬০০০/.test(H.headToArgs({ person_id: UU, title: "t", body_md: "আ".repeat(6001) }).error));
+    assert.ok(H.headToArgs({ person_id: UU, title: "t", body_md: "😀".repeat(6000) }).args);                                   // characters, not UTF-16 units (the database counts characters)
+    assert.ok(H.headToArgs({ person_id: UU, title: "t", body_md: "😀".repeat(6001) }).error);
+    assert.ok(H.headToArgs().error);
+    assert.strictEqual(H.chars("a😀ক"), 3);
+  }
+
+  // dates
+  assert.ok(H.isoDateOk("2020-02-29", "2026-11-20") && H.isoDateOk("2026-11-20", "2026-11-20") && H.isoDateOk("1800-01-01", "2026-11-20"));
+  ["2021-02-29", "2026-11-21", "1799-12-31", "20-1-1", "2020-13-01", "abc", "", null, "2020-1-01"].forEach((d) => assert.ok(!H.isoDateOk(d, "2026-11-20"), String(d)));
+  assert.strictEqual(H.dhakaToday(Date.UTC(2026, 10, 20, 18, 30)), "2026-11-21");                                               // 18:30 UTC is already the next day in Dhaka
+
+  // museum
+  {
+    const T = { today: "2026-11-20" };
+    const ok = H.museumToPayload({ id: UU, title_bn: " প্রজাপতি ", title_en: "Butterfly  ", scientific_name: "Papilio demoleus", category: "পোকামাকড়", catalog_no: " M-001 ",
+      description: "Line one\r\n\r\nLine two  ", collected_from: "রংপুর", collected_on: "2020-05-17", photo_path: "museum/202611/a.jpg", is_published: true, sort_order: "30" }, T);
+    assert.strictEqual(ok.payload.title_bn, "প্রজাপতি"); assert.strictEqual(ok.payload.catalog_no, "M-001"); assert.strictEqual(ok.payload.description, "Line one\n\nLine two");
+    assert.strictEqual(ok.payload.id, UU); assert.strictEqual(ok.payload.sort_order, 30); assert.strictEqual(ok.payload.is_published, true);
+    const min = H.museumToPayload({ title_bn: "x" }, T).payload;
+    assert.strictEqual(min.catalog_no, null); assert.strictEqual(min.collected_on, null); assert.strictEqual(min.photo_path, null); assert.strictEqual(min.is_published, false); assert.ok(!("id" in min) && !("sort_order" in min));
+    assert.ok(/নাম \(বাংলা\)/.test(H.museumToPayload({ title_bn: "  " }, T).error));
+    assert.ok(H.museumToPayload({ title_bn: "অ".repeat(200), title_en: "a".repeat(200), scientific_name: "a".repeat(200), category: "ক".repeat(60), catalog_no: "c".repeat(40),
+      description: "d".repeat(3000), collected_from: "f".repeat(200) }, T).payload);
+    [["title_bn", 201], ["title_en", 201], ["scientific_name", 201], ["category", 61], ["catalog_no", 41], ["description", 3001], ["collected_from", 201]].forEach(([k, n]) => {
+      const f = { title_bn: "x" }; f[k] = "a".repeat(n);
+      assert.ok(H.museumToPayload(f, T).error, k);
+    });
+    ["2026-11-21", "2020-02-31", "17/05/2020", "abc", "1700-01-01"].forEach((d) => assert.ok(/তারিখ/.test(H.museumToPayload({ title_bn: "x", collected_on: d }, T).error), d));
+    assert.ok(H.museumToPayload({ title_bn: "x", collected_on: "2026-11-20" }, T).payload);
+    ["a/../b.jpg", "a//b.jpg", "/abs.jpg", "a b.jpg", "javascript:alert(1)"].forEach((p) => assert.ok(/ছবির পথ/.test(H.museumToPayload({ title_bn: "x", photo_path: p }, T).error), p));
+  }
+
+  // library form
+  {
+    const ok = H.libraryToPayload({ id: UU, title: " Zoology  Vol 1 ", author: "A. Rahman", category: "পাঠ্যবই", publisher: "Pub", edition_year: "২০১৫", accession_no: " ACC-001 ", shelf: "A1", copies: "3", note: "ok", is_published: true });
+    assert.deepStrictEqual(ok.payload, { title: "Zoology Vol 1", author: "A. Rahman", category: "পাঠ্যবই", publisher: "Pub", shelf: "A1", note: "ok", accession_no: "ACC-001", is_published: true, edition_year: 2015, copies: 3, id: UU });
+    const min = H.libraryToPayload({ title: "x" }).payload;
+    assert.strictEqual(min.edition_year, null); assert.strictEqual(min.copies, 1); assert.strictEqual(min.accession_no, null); assert.strictEqual(min.is_published, false);
+    assert.ok(/শিরোনাম/.test(H.libraryToPayload({ title: " " }).error));
+    assert.ok(H.libraryToPayload({ title: "t".repeat(300), author: "a".repeat(200), publisher: "p".repeat(200), category: "c".repeat(60), shelf: "s".repeat(40), note: "n".repeat(300), accession_no: "x".repeat(40) }).payload);
+    [["title", 301], ["author", 201], ["publisher", 201], ["category", 61], ["shelf", 41], ["note", 301], ["accession_no", 41]].forEach(([k, n]) => {
+      const f = { title: "x" }; f[k] = "a".repeat(n);
+      assert.ok(H.libraryToPayload(f).error, k);
+    });
+    assert.strictEqual(H.libraryToPayload({ title: "x", edition_year: "1500" }).payload.edition_year, 1500);
+    assert.strictEqual(H.libraryToPayload({ title: "x", edition_year: "2100" }).payload.edition_year, 2100);
+    ["1499", "2101", "abc", "20.5", "-5", "0"].forEach((y) => assert.ok(/১৫০০ থেকে ২১০০/.test(H.libraryToPayload({ title: "x", edition_year: y }).error), y));
+    assert.strictEqual(H.libraryToPayload({ title: "x", copies: "0" }).payload.copies, 0);
+    assert.strictEqual(H.libraryToPayload({ title: "x", copies: "999" }).payload.copies, 999);
+    ["1000", "-1", "x", "1.5"].forEach((c) => assert.ok(/৯৯৯/.test(H.libraryToPayload({ title: "x", copies: c }).error), c));
+  }
+
+  // library import: headings -> rows
+  {
+    const en = ["Title", "Author", "Category", "Publisher", "Edition Year", "Accession No", "Shelf", "Copies", "Note"];
+    const m = H.autoMapLibHeaders(en);
+    assert.deepStrictEqual(Object.keys(m).sort(), H.LIB_FIELDS.map((f) => f.key).sort());
+    const bnHeads = ["শিরোনাম", "লেখক", "বিভাগ", "প্রকাশক", "প্রকাশের সাল", "সংগ্রহ নম্বর", "তাক", "কপি", "মন্তব্য"];
+    assert.deepStrictEqual(Object.keys(H.autoMapLibHeaders(bnHeads)).sort(), H.LIB_FIELDS.map((f) => f.key).sort());
+    const heads = ["ক্রম", "বইয়ের নাম", "Author", "বিভাগ", "Publisher", "সাল", "Accession No", "তাক", "কপি", "মন্তব্য"];
+    const grid = [
+      ["সেমিনার লাইব্রেরি তালিকা", "", "", "", "", "", "", "", "", ""],
+      heads,
+      ["1", "Zoology Vol 1", "A. Rahman", "পাঠ্যবই", "Pub", "2015", "ACC-1", "A1", "3", "ok"],
+      ["2", "", "No title", "", "", "", "", "", "", ""],
+      ["3", "Old book", "", "", "", "1200", "", "", "", ""],
+      ["", "", "", "", "", "", "", "", "", ""],
+      ["5", "Dup of one", "", "", "", "", "acc-1", "", "", ""],
+      ["6", "Excel numbers", "", "", "", "2015.0", "ACC-2", "", "2.0", ""]
+    ];
+    const hi = H.findLibHeaderRow(grid);
+    assert.strictEqual(hi, 1);
+    const mapping = H.autoMapLibHeaders(grid[hi]);
+    assert.ok(mapping.title === 1 && mapping.edition_year === 5 && mapping.accession_no === 6 && mapping.copies === 8, JSON.stringify(mapping));
+    assert.strictEqual(H.countDataRows(grid, hi), 5);
+    const built = H.buildLibraryRows(grid, hi, mapping);
+    assert.deepStrictEqual(built.rows.map((r) => r.rowNumber), [3, 4, 5, 7, 8]);                                       // file row numbers; the blank row is skipped
+    assert.deepStrictEqual(built.rows.map((r) => r.ok), [false, false, false, false, true]);
+    assert.ok(built.rows[0].issues.some((i) => i.code === "dup_in_file" && /৭/.test(i.msg)) && built.rows[3].issues.some((i) => i.code === "dup_in_file" && /৩/.test(i.msg)));   // both rows of a repeated accession number are refused, any letter case
+    assert.ok(built.rows[1].issues.some((i) => i.code === "missing_title"));
+    assert.ok(built.rows[2].issues.some((i) => i.code === "bad_year"));
+    assert.deepStrictEqual(built.rows[4].payload, { row: 8, title: "Excel numbers", edition_year: 2015, accession_no: "ACC-2", copies: 2 });   // empty cells are left out; Excel numbers repaired
+    assert.strictEqual(built.rows[0].raw.title, "Zoology Vol 1");
+    // long values
+    const long = H.buildLibraryRows([["Title", "Author", "Copies"], ["t".repeat(301), "a".repeat(201), "1000"]], 0, H.autoMapLibHeaders(["Title", "Author", "Copies"])).rows[0];
+    assert.ok(!long.ok && long.issues.length === 3);
+    const okLong = H.buildLibraryRows([["Title", "Author"], ["t".repeat(300), "a".repeat(200)]], 0, H.autoMapLibHeaders(["Title", "Author"])).rows[0];
+    assert.ok(okLong.ok);
+    // Bangla digits in the year
+    assert.strictEqual(H.buildLibraryRows([["Title", "Year"], ["x", "২০১৫"]], 0, H.autoMapLibHeaders(["Title", "Year"])).rows[0].payload.edition_year, 2015);
+    // a file without a Title column
+    assert.strictEqual(H.autoMapLibHeaders(["Author", "Year"]).title, undefined);
+  }
+
+  // the server's answer for one row -> Bangla, never SQL text
+  {
+    ["lib_title_required", "lib_too_long", "lib_bad_year", "lib_bad_copies", "lib_bad_number", "lib_dup_accession", "lib_bad_publish", "lib_bad_row"].forEach((c) => {
+      const t = H.libImportErrorBn({ status: "error", code: c, message: "select * from secret" });
+      assert.ok(/[ঀ-৿]/.test(t) && !/select|secret/i.test(t), c);
+    });
+    ["lib_invalid_row", "XX000", "", undefined, "constructor", "toString"].forEach((c) => {
+      const t = H.libImportErrorBn({ status: "error", code: c, message: "ERROR: duplicate key value violates unique constraint site_library_accession_uq" });
+      assert.ok(/[ঀ-৿]/.test(t) && !/duplicate|constraint|ERROR/i.test(t), String(c));
+    });
+    assert.ok(/[ঀ-৿]/.test(H.libImportErrorBn(null)));
+  }
+
+  // template and failed rows survive a round trip
+  {
+    const g = H.parseCsv(H.libraryTemplateCsv());
+    assert.strictEqual(g.length, 3);
+    const m = H.autoMapLibHeaders(g[0]);
+    assert.strictEqual(Object.keys(m).length, H.LIB_FIELDS.length);
+    const built = H.buildLibraryRows(g, 0, m);
+    assert.strictEqual(built.rows.length, 2); assert.ok(built.rows.every((r) => r.ok));
+    assert.strictEqual(built.rows[0].payload.edition_year, 2015); assert.strictEqual(built.rows[0].payload.copies, 2); assert.ok(!("publisher" in built.rows[1].payload) && !("edition_year" in built.rows[1].payload));
+    const csv = H.libFailedRowsCsv([{ rowNumber: 5, raw: { title: "A, B", accession_no: "X-1", note: "=1+1" }, reason: "শিরোনাম নেই" }]);
+    const f = H.parseCsv(csv), fm = H.autoMapLibHeaders(f[0]);
+    assert.strictEqual(f.length, 2); assert.strictEqual(f[0].length, H.LIB_FIELDS.length + 2);
+    assert.strictEqual(f[1][fm.title], "A, B"); assert.strictEqual(f[1][fm.accession_no], "X-1");
+    assert.ok(f[1][fm.note].charAt(0) === "'");                                                                          // a cell that looks like a formula is defused
+    assert.ok(Object.values(fm).every((i) => i < H.LIB_FIELDS.length));                                                  // the two extra columns are ignored on re-upload
+    assert.strictEqual(f[1][f[0].length - 1], "5");
+  }
+
+  // wiring and safety of the new admin files
+  {
+    const dir = path.join(__dirname, "admin");
+    const html = fs.readFileSync(path.join(dir, "index.html"), "utf8");
+    const order = ["helpers.js", "core.js", "sheet.js", "views-content.js", "views-other.js", "views-site.js", "views-library.js", "views-library-import.js", "views-import.js", "admin.js"];
+    order.forEach((f, i) => { assert.ok(html.indexOf('src="' + f + '"') > 0, f); if (i) assert.ok(html.indexOf('src="' + f + '"') > html.indexOf('src="' + order[i - 1] + '"'), f + " after " + order[i - 1]); });
+    ["views-site.js", "views-library.js", "views-library-import.js", "sheet.js"].forEach((f) => {
+      const src = fs.readFileSync(path.join(dir, f), "utf8");
+      assert.ok(!/innerHTML|outerHTML|insertAdjacentHTML|document\.write|console\.|service_role|eval\(/.test(src), f);
+    });
+    const site = fs.readFileSync(path.join(dir, "views-site.js"), "utf8"), lib = fs.readFileSync(path.join(dir, "views-library.js"), "utf8"), imp = fs.readFileSync(path.join(dir, "views-library-import.js"), "utf8");
+    assert.ok(/V\.head\s*=/.test(site) && /V\.museum\s*=/.test(site) && /V\.library\s*=/.test(lib) && /A\.libraryImport\s*=/.test(imp));
+    assert.ok(/area: "museum"/.test(site));                                                                              // museum photos go to the museum/ area
+    assert.ok(/site_head_set/.test(site) && /site_museum_reorder/.test(site) && /site_library_import/.test(imp) && /site_library_list/.test(lib));
+    // the library import never shows what the server wrote, only a mapped Bangla text
+    assert.ok(/libImportErrorBn/.test(imp) && !/\.message\b/.test(imp));
+    // the control panel switch and the page links
+    const other = fs.readFileSync(path.join(dir, "views-other.js"), "utf8");
+    assert.ok(/site\.routine_public/.test(other) && /#\/pages\/museum/.test(other) && /#\/pages\/seminar-library/.test(other));
+    // the three starting pages are protected from deletion in the pages screen
+    const content = fs.readFileSync(path.join(dir, "views-content.js"), "utf8");
+    assert.ok(/CORE_SLUGS = \[[^\]]*"head-message"[^\]]*"seminar-library"[^\]]*"museum"/.test(content));
+  }
+}
+console.log("task 53 (head corner, museum, library) OK");

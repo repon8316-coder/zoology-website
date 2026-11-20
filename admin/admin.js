@@ -5,7 +5,7 @@
   var A = window.Admin, H = A.H, el = A.el, clear = A.clear, L = A.L;
   var root = document.getElementById("root");
   var NAV = [["dashboard", "ড্যাশবোর্ড"], ["notices", "নোটিশ"], ["people", "শিক্ষক ও কর্মচারী"], ["gallery", "গ্যালারি"], ["downloads", "ডাউনলোড"],
-    ["pages", "পাতা"], ["submissions", "ফর্মে জমা পড়া তথ্য"], ["control", "কন্ট্রোল প্যানেল"]];
+    ["pages", "পাতা"], ["submissions", "ফর্মে জমা পড়া তথ্য"], ["import", "শিক্ষার্থী ইমপোর্ট"], ["control", "কন্ট্রোল প্যানেল"]];
   var TITLES = {};
   NAV.forEach(function (n) { TITLES[n[0]] = n[1]; });
   var state = { mode: "boot", explicitOut: false, currentHash: "", reverting: false, shell: null };

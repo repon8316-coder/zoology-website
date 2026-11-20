@@ -127,6 +127,25 @@ assert.ok(!H.classifyFile({ name: "a.jpg", size: 10 * 1024 * 1024 + 1, type: "" 
 assert.ok(H.classifyFile({ name: "a.jpg", size: 10 * 1024 * 1024, type: "" }, JPG, "any").ok);
 assert.ok(!H.classifyFile({ name: "a.png", size: 10, type: "image/jpeg" }, PNG, "any").ok);                // wrong browser MIME
 assert.ok(/MB/.test(H.classifyFile({ name: "a.jpg", size: 11 * 1024 * 1024, type: "" }, JPG, "any").error));
+// pictures: the REAL type decides (a JPEG named icon.png is accepted and stored as jpg), documents stay strict
+{
+  const a = H.classifyFile({ name: "icon.png", size: 1000, type: "image/png" }, JPG, "image");     // what a browser reports for icon.png
+  assert.deepStrictEqual(a, { ok: true, ext: "jpg", kind: "image", mime: "image/jpeg" });
+  const b = H.classifyFile({ name: "photo.jpg", size: 1000, type: "image/jpeg" }, PNG, "image");
+  assert.deepStrictEqual(b, { ok: true, ext: "png", kind: "image", mime: "image/png" });
+  assert.deepStrictEqual(H.classifyFile({ name: "x.jpeg", size: 10, type: "" }, WEBP, "any"), { ok: true, ext: "webp", kind: "image", mime: "image/webp" });
+  assert.deepStrictEqual(H.classifyFile({ name: "icon.png", size: 10, type: "" }, JPG, "any"), { ok: true, ext: "jpg", kind: "image", mime: "image/jpeg" });
+  assert.ok(!H.classifyFile({ name: "doc.png", size: 10, type: "image/png" }, PDF, "image").ok);                       // a PDF named .png
+  assert.ok(!H.classifyFile({ name: "note.png", size: 10, type: "image/png" }, [0x68, 0x65, 0x6C, 0x6C, 0x6F, 0x20], "image").ok);   // text named .png
+  assert.ok(!H.classifyFile({ name: "x.png", size: 10, type: "image/png" }, ZIP, "any").ok);                           // a zip named .png
+  assert.ok(!H.classifyFile({ name: "icon.png", size: 10, type: "application/pdf" }, JPG, "any").ok);                  // browser type is something else
+  assert.ok(!H.classifyFile({ name: "a.pdf", size: 10, type: "" }, ZIP, "any").ok);                                    // pdf / docx / xlsx: extension must match
+  assert.ok(!H.classifyFile({ name: "a.docx", size: 10, type: "" }, PDF, "any").ok);
+  assert.ok(!H.classifyFile({ name: "a.xlsx", size: 10, type: "" }, JPG, "any").ok);
+  assert.ok(!H.classifyFile({ name: "a.pdf", size: 10, type: "" }, JPG, "any").ok);
+  // the corrected extension is what the storage path uses
+  assert.strictEqual(H.buildPath("gallery", D, U1, "icon.png", a.ext), "gallery/202611/" + U1 + "-icon.jpg");
+}
 // image size math
 assert.deepStrictEqual(H.fitDimensions(3200, 1600), { w: 1600, h: 800, scaled: true });
 assert.deepStrictEqual(H.fitDimensions(1200, 4800), { w: 400, h: 1600, scaled: true });
@@ -195,3 +214,190 @@ assert.strictEqual(H.fileKey({ name: "a", size: 1, lastModified: 2 }), "a|1|2");
 assert.deepStrictEqual(H.uniqueValues([" a ", "b", "a", "", null, "b"]), ["a", "b"]);
 assert.strictEqual(H.uploadSummary(8, 7), "৮টির মধ্যে ৭টি যুক্ত হয়েছে"); assert.strictEqual(H.uploadSummary(12, 0), "১২টির মধ্যে ০টি যুক্ত হয়েছে");
 console.log("admin/helpers.js OK");
+
+// ---------------- student import (CSV / Excel): admin/helpers.js + the menu / route wiring ----------------
+const fs = require("fs"), path = require("path");
+{
+  // headings (same names and aliases as the Flutter app)
+  assert.strictEqual(H.importKey("Registration No"), "registrationno");
+  assert.strictEqual(H.importKey("  রেজিস্ট্রেশন   নং "), H.importKey("রেজিস্ট্রেশন নং"));
+  assert.strictEqual(H.importKey("ডিগ্রী"), H.importKey("ডিগ্রি"));
+  assert.strictEqual(H.importKey("১ম"), "1ম");
+  assert.strictEqual(H.importKey("য়"), H.importKey("য়"));                  // য় written two ways
+  assert.deepStrictEqual(H.autoMapHeaders(["Registration No", "Name (English)", "মোবাইল নং", "Foo", "ঠিকানা"]), { registration_no: 0, name_en: 1, mobile: 2, address: 4 });
+  assert.deepStrictEqual(H.autoMapHeaders(["reg no", "নাম", "Phone", "DOB", "Sex", "Blood Group"]), { registration_no: 0, name_bn: 1, mobile: 2, date_of_birth: 3, gender: 4, blood_group: 5 });
+  {   // the app's own export headings all map back to their field
+    const heads = H.IMPORT_TEMPLATE_KEYS.map((k) => H.IMPORT_FIELDS.find((f) => f.key === k).bn);
+    const m = H.autoMapHeaders(heads);
+    H.IMPORT_TEMPLATE_KEYS.forEach((k, i) => assert.strictEqual(m[k], i, k));
+    const m2 = H.autoMapHeaders(H.IMPORT_TEMPLATE_KEYS.map((k) => H.IMPORT_FIELDS.find((f) => f.key === k).en));
+    H.IMPORT_TEMPLATE_KEYS.forEach((k, i) => assert.strictEqual(m2[k], i, "en " + k));
+  }
+  assert.strictEqual(H.findHeaderRow([["রিপোর্ট"], [], ["Registration No", "Name", "Mobile"], ["1", "a", "b"]]), 2);
+  assert.strictEqual(H.findHeaderRow([]), -1); assert.strictEqual(H.findHeaderRow([["", ""], ["x"]]), 1);
+  assert.strictEqual(H.countDataRows([["h"], [""], ["a"], [" "], ["b"]], 0), 2);
+
+  // CSV reader / writer
+  assert.deepStrictEqual(H.parseCsv("﻿a,b\r\n1,2\r\n"), [["a", "b"], ["1", "2"]]);
+  assert.deepStrictEqual(H.parseCsv('a,"b,c",d\n"x ""q"" y","l1\nl2",z'), [["a", "b,c", "d"], ['x "q" y', "l1\nl2", "z"]]);
+  assert.deepStrictEqual(H.parseCsv("a;b\n1;2"), [["a", "b"], ["1", "2"]]);
+  assert.deepStrictEqual(H.parseCsv("a,b\n\n1,2"), [["a", "b"], [""], ["1", "2"]]);
+  assert.deepStrictEqual(H.parseCsv("a,b\r1,2"), [["a", "b"], ["1", "2"]]);
+  assert.deepStrictEqual(H.parseCsv("a,b,"), [["a", "b", ""]]);
+  assert.deepStrictEqual(H.parseCsv(""), []); assert.deepStrictEqual(H.parseCsv(null), []);
+  assert.deepStrictEqual(H.parseCsv("০০১২৩,নাম\n"), [["০০১২৩", "নাম"]]);             // text stays text
+  assert.strictEqual(H.toCsv([["a", "b,c"], ['x "q"', ""]]), 'a,"b,c"\r\n"x ""q""",\r\n');
+  assert.strictEqual(H.toCsv([["=1+1", "+8801712345678", "-x", "ok", " pad"]]), "'=1+1,+8801712345678,'-x,ok,\" pad\"\r\n");   // no formulas
+  assert.deepStrictEqual(H.parseCsv(H.toCsv([["a", 'b "c", d\ne']])), [["a", 'b "c", d\ne']]);
+  // numbers from an .xlsx cell
+  assert.strictEqual(H.numToText(990000001), "990000001"); assert.strictEqual(H.numToText(1234567890123), "1234567890123");
+  assert.strictEqual(H.numToText(1.5), "1.5"); assert.strictEqual(H.numToText(0.1 + 0.2), "0.3"); assert.strictEqual(H.numToText(NaN), "");
+  assert.ok(!/e/i.test(H.numToText(9.90000001e8)));
+
+  // cell rules
+  assert.strictEqual(H.normMobile("০১৭১২৩৪৫৬৭৮"), "01712345678"); assert.strictEqual(H.normMobile("+880 1712-345678"), "01712345678");
+  assert.strictEqual(H.normMobile("1712345678"), "01712345678"); assert.strictEqual(H.normMobile("0123"), "0123");
+  assert.strictEqual(H.parseImportDate("15/07/2025").iso, "2025-07-15"); assert.strictEqual(H.parseImportDate("১৫-০৭-২০২৫").iso, "2025-07-15");
+  assert.strictEqual(H.parseImportDate("2025-7-5").iso, "2025-07-05"); assert.strictEqual(H.parseImportDate("2025-07-15T00:00:00").iso, "2025-07-15");
+  assert.strictEqual(H.parseImportDate("37631").iso, "2003-01-10");                                       // Excel day number
+  ["31/02/2020", "32/01/2020", "2005", "", "abc", "1899-01-01", "13/13/2020"].forEach((v) => assert.strictEqual(H.parseImportDate(v), null, v));
+  assert.strictEqual(H.parseSession("২০২২-২৩"), "2022-23"); assert.strictEqual(H.parseSession("2022-2023"), "2022-23"); assert.strictEqual(H.parseSession("2022/23"), "2022-23");
+  ["2022-24", "2022", "1900-01", "", "abc"].forEach((v) => assert.strictEqual(H.parseSession(v), null, v));
+  assert.strictEqual(H.parseGender("Male"), "male"); assert.strictEqual(H.parseGender(" F "), "female"); assert.strictEqual(H.parseGender("ছেলে"), "male");
+  assert.strictEqual(H.parseGender("x"), null); assert.strictEqual(H.parseGender(""), null); assert.strictEqual(H.parseGender("constructor"), null);
+  assert.strictEqual(H.parseBloodGroup("a +"), "A+"); assert.strictEqual(H.parseBloodGroup("A positive"), "A+"); assert.strictEqual(H.parseBloodGroup("ab-"), "AB-");
+  assert.strictEqual(H.parseBloodGroup("0+"), "O+"); assert.strictEqual(H.parseBloodGroup("O Negative"), "O-"); assert.strictEqual(H.parseBloodGroup("এ+"), "A+");
+  assert.strictEqual(H.parseBloodGroup("C+"), null); assert.strictEqual(H.parseBloodGroup(""), null);
+  assert.strictEqual(H.parseGroup("মেজর"), "major"); assert.strictEqual(H.parseGroup("Non-Major"), "non_major"); assert.strictEqual(H.parseGroup("ডিগ্রি"), "degree"); assert.strictEqual(H.parseGroup("xx"), null);
+  assert.strictEqual(H.parseStatus("অধ্যয়নরত"), "active"); assert.strictEqual(H.parseStatus("Left"), "left"); assert.strictEqual(H.parseStatus("?"), null);
+  assert.strictEqual(H.parseYear("২য়"), 2); assert.strictEqual(H.parseYear("2nd year"), 2); assert.strictEqual(H.parseYear("দ্বিতীয় বর্ষ"), 2);
+  assert.strictEqual(H.parseYear("প্রথম"), 1); assert.strictEqual(H.parseYear("7"), null); assert.strictEqual(H.parseYear(""), null);
+  assert.strictEqual(H.guessYear("2022-23", 4, new Date(2026, 10, 1)), 4); assert.strictEqual(H.guessYear("2025-26", 4, new Date(2026, 10, 1)), 1);
+  assert.strictEqual(H.guessYear("2010-11", 4, new Date(2026, 10, 1)), 4); assert.strictEqual(H.guessYear("2022-23", 1, new Date(2026, 10, 1)), 1);
+  assert.deepStrictEqual(H.parseAddress("গ্রাম: ক, ডাকঘর: খ, থানা: গ, জেলা: ঘ"), { village: "ক", post: "খ", thana: "গ", zila: "ঘ" });
+  assert.deepStrictEqual(H.parseAddress("ক, খ, গ, ঘ"), { village: "ক", post: "খ", thana: "গ", zila: "ঘ" });
+  assert.deepStrictEqual(H.parseAddress("Vill: A, PO: B, PS: C, Dist: D"), { village: "A", post: "B", thana: "C", zila: "D" });
+
+  // checking rows
+  const PROGS = [{ name: "B.Sc (Honours)", name_bn: "বিএসসি (অনার্স)", duration_years: 4 }, { name: "M.Sc", name_bn: "এমএসসি", duration_years: 1 }];
+  const BATCHES = [{ program: "B.Sc (Honours)", session: "2022-23", year_of_study: 4 }];
+  const TODAY = new Date(2026, 10, 20);
+  const build = (csv, extra) => {
+    const grid = H.parseCsv(csv), hi = H.findHeaderRow(grid);
+    return H.buildImportRows(grid, hi, H.autoMapHeaders(grid[hi].map(H.cleanCell)), Object.assign({ programs: PROGS, batches: BATCHES, today: TODAY }, extra || {}));
+  };
+  const errCodes = (r) => r.issues.filter((i) => i.error).map((i) => i.code).sort();
+  {   // the downloadable template passes its own checks
+    const t = build(H.importTemplateCsv());
+    assert.strictEqual(t.rows.length, 2);
+    assert.ok(t.rows.every((r) => r.ok && r.issues.length === 0), JSON.stringify(t.rows.map((r) => r.issues)));
+    assert.strictEqual(t.rows[0].reg, "990000001"); assert.strictEqual(t.rows[1].reg, "990000002");
+    assert.deepStrictEqual(t.rows[0].payload, { row: 2, registration_no: "990000001", name_bn: "নমুনা এক", name_en: "Sample One", class_roll: "1", father_name: "নমুনা পিতা",
+      mother_name: "নমুনা মাতা", father_name_en: "Sample Father", mother_name_en: "Sample Mother", guardian_name: "নমুনা পিতা", mobile: "01700000001", guardian_mobile: "01700000011",
+      study_group: "major", date_of_birth: "2006-01-01", admission_date: "2025-07-15", gender: "male", blood_group: "A+", email: "sample1@example.com", status: "active",
+      address_village: "নমুনা গ্রাম", address_post: "নমুনা", address_thana: "রংপুর সদর", address_zila: "রংপুর", program: "B.Sc (Honours)", session: "2025-26", year_of_study: 1 });
+    assert.deepStrictEqual(t.newBatches, [{ program: "B.Sc (Honours)", session: "2025-26", year: 1, count: 2 }]);
+    assert.strictEqual(t.rows[1].payload.gender, "female");
+  }
+  {   // Bangla digits, leading zeros, a mobile whose 0 was dropped, a program written in Bangla, local errors, duplicates
+    const csv = [
+      "রেজিস্ট্রেশন নং,Name (English),মোবাইল,জন্মতারিখ,লিঙ্গ,রক্তের গ্রুপ,শিক্ষাবর্ষ,প্রোগ্রাম",
+      "০০১২৩,Rahim,০১৭১২৩৪৫৬৭৮,15/07/2005,ছেলে,a +,২০২২-২৩,B.Sc (Honours)",
+      "001234,Karim,1712345679,2005-07-15,মেয়ে,O+,2022-23,এমএসসি",
+      ",NoReg,01712345678,,,,,",
+      "7777,Dup A,01712345678,,,,,",
+      "7777,Dup B,01712345679,,,,,",
+      "8888,Bad,0123,32/13/2005,x,Z+,2022-25,Unknown"
+    ].join("\n");
+    const b = build(csv);
+    assert.deepStrictEqual(b.rows.map((r) => r.rowNumber), [2, 3, 4, 5, 6, 7]);
+    assert.ok(b.rows[0].ok); assert.strictEqual(b.rows[0].reg, "00123");                                    // leading zeros kept
+    assert.deepStrictEqual(b.rows[0].payload, { row: 2, registration_no: "00123", name_en: "Rahim", mobile: "01712345678", date_of_birth: "2005-07-15", gender: "male",
+      blood_group: "A+", program: "B.Sc (Honours)", session: "2022-23", year_of_study: 4 });                  // known batch -> its own year
+    assert.ok(b.rows[1].ok); assert.strictEqual(b.rows[1].payload.mobile, "01712345679"); assert.strictEqual(b.rows[1].payload.program, "M.Sc");
+    assert.deepStrictEqual(b.newBatches, [{ program: "M.Sc", session: "2022-23", year: 1, count: 1 }]);
+    assert.deepStrictEqual(errCodes(b.rows[2]), ["missing_reg"]);
+    assert.deepStrictEqual(errCodes(b.rows[3]), ["dup_in_file"]); assert.deepStrictEqual(errCodes(b.rows[4]), ["dup_in_file"]);
+    const dupMsg = (r) => r.issues.find((i) => i.code === "dup_in_file").msg;
+    assert.ok(/সারি ৬/.test(dupMsg(b.rows[3])) && /সারি ৫/.test(dupMsg(b.rows[4])));
+    assert.deepStrictEqual(errCodes(b.rows[5]), ["bad_blood", "bad_date", "bad_gender", "bad_mobile", "bad_session", "unknown_program"]);
+    assert.ok(b.rows.slice(2).every((r) => !r.ok));
+  }
+  {   // a date in the future is wrong; today is fine
+    const b = build("Registration No,Name (English),Mobile,Date of Birth\n1,A,01712345678,21/11/2026\n2,B,01712345678,20/11/2026");
+    assert.deepStrictEqual(errCodes(b.rows[0]), ["bad_date"]); assert.ok(b.rows[1].ok);
+  }
+  {   // new vs existing students, soft-deleted ones, and when the lookup failed
+    const csv = "Registration No,Name (English),Mobile\n100,Old Student,\n200,,\n300,New Guy,01712345678\n400,Gone,01712345678";
+    const b = build(csv, { existing: { "100": false, "400": true } });
+    assert.ok(b.rows[0].ok);                                                                               // existing: name / mobile may stay empty
+    assert.deepStrictEqual(errCodes(b.rows[1]), ["missing_mobile", "missing_name"]);
+    assert.ok(b.rows[2].ok); assert.deepStrictEqual(errCodes(b.rows[3]), ["deleted"]);
+    const c = build(csv, { existing: null });
+    assert.ok(c.rows[1].ok && c.rows[1].issues.length >= 2 && c.rows[1].issues.every((i) => !i.error));   // unknown: only a warning, the server decides
+    assert.ok(!c.rows[3].issues.some((i) => i.code === "deleted"));
+  }
+  {   // batch: default batch, none, half
+    const hdr = "Registration No,Name (English),Mobile";
+    const d = build(hdr + "\n500,A,01712345678", { defaultBatch: { program: "B.Sc (Honours)", session: "2022-23", year_of_study: 4 } });
+    assert.ok(d.rows[0].ok); assert.strictEqual(d.rows[0].payload.program, "B.Sc (Honours)"); assert.strictEqual(d.rows[0].payload.year_of_study, 4); assert.deepStrictEqual(d.newBatches, []);
+    const n = build(hdr + "\n500,A,01712345678");
+    assert.ok(n.rows[0].ok); assert.ok(!("program" in n.rows[0].payload)); assert.ok(n.rows[0].issues.some((i) => i.code === "no_batch" && !i.error));
+    const h = build(hdr + ",Program\n600,A,01712345678,M.Sc");
+    assert.deepStrictEqual(errCodes(h.rows[0]), ["half_batch"]);
+    const k = build(hdr + ",Program,Session\n700,A,01712345678,M.Sc,2024-25"); assert.ok(k.rows[0].ok); assert.strictEqual(k.rows[0].payload.year_of_study, 1);
+    const np = build(hdr + ",Program,Session\n700,A,01712345678,M.Sc,2024-25", { programs: null });
+    assert.deepStrictEqual(errCodes(np.rows[0]), ["programs_unknown"]);                                      // never an unchecked program name
+  }
+  {   // registration numbers: Excel damage is caught, "123.0" is repaired, unknown columns are not sent
+    const hdr = "Registration No,Name (English),Mobile";
+    assert.deepStrictEqual(errCodes(build(hdr + "\n9.90000001E+8,A,01712345678").rows[0]), ["sci"]);
+    assert.strictEqual(build(hdr + "\n123.0,A,01712345678").rows[0].reg, "123");
+    assert.strictEqual(build(hdr + "\nab12,A,01712345678").rows[0].reg, "AB12");
+    const u = build(hdr + ",Foo\n1,A,01712345678,secret");
+    assert.deepStrictEqual(Object.keys(u.rows[0].payload).sort(), ["mobile", "name_en", "registration_no", "row"]);
+    assert.deepStrictEqual(u.rows[0].raw, { registration_no: "1", name_en: "A", mobile: "01712345678" });
+    const a = build(hdr + ",ঠিকানা\n1,A,01712345678,\"গ্রাম: ক, ডাকঘর: খ, থানা: গ, জেলা: ঘ\"");
+    assert.strictEqual(a.rows[0].payload.address_village, "ক"); assert.strictEqual(a.rows[0].payload.address_zila, "ঘ");
+    assert.ok(!("address" in a.rows[0].payload));
+    assert.ok(build(hdr + "\n1,A,01712345678\n\n  ,  ,\n2,B,01712345679").rows.length === 2);                   // blank rows skipped, numbers kept
+    assert.deepStrictEqual(build(hdr + "\n1,A,01712345678\n\n2,B,01712345679").rows.map((r) => r.rowNumber), [2, 4]);
+  }
+  // chunks and server errors
+  assert.deepStrictEqual(H.chunkList([1, 2, 3, 4, 5], 2), [[1, 2], [3, 4], [5]]); assert.deepStrictEqual(H.chunkList([], 200), []);
+  assert.strictEqual(H.chunkList(new Array(401).fill(0)).length, 3); assert.strictEqual(H.IMPORT_CHUNK, 200); assert.ok(H.IMPORT_CHUNK <= 500);
+  assert.strictEqual(H.IMPORT_MAX_ROWS, 2000); assert.strictEqual(H.IMPORT_MAX_BYTES, 5 * 1024 * 1024);
+  assert.ok(/মোবাইল/.test(H.importErrorBn({ status: "error", code: "23502", message: 'null value in column "mobile" of relation "students" violates not-null constraint' })));
+  assert.strictEqual(H.importErrorBn({ status: "error", code: "23514", message: 'new row violates check constraint "students_mobile_check"' }), "মোবাইল নম্বর সঠিক নয়");
+  assert.ok(/মুছে/.test(H.importErrorBn({ status: "deleted" })));
+  assert.ok(/ভুল ধরনের/.test(H.importErrorBn({ status: "error", code: "22P02", message: 'invalid input syntax for type smallint: "abc"' })));
+  {
+    const g = H.importErrorBn({ status: "error", code: "XX000", message: "select * from secret_table where password" });
+    assert.ok(!/select|secret|password/i.test(g) && /[ঀ-৿]/.test(g));                                         // unknown error: generic Bangla, never raw SQL
+    assert.ok(/[ঀ-৿]/.test(H.importErrorBn(null)));
+  }
+  {   // failed rows -> CSV that can be fixed and uploaded again
+    const text = H.failedRowsCsv([{ rowNumber: 5, raw: { registration_no: "123", name_en: "A, B", mobile: "0123" }, reason: "মোবাইল নম্বর সঠিক নয়" }]);
+    const g = H.parseCsv(text);
+    assert.strictEqual(g.length, 2); assert.strictEqual(g[0].length, H.IMPORT_TEMPLATE_KEYS.length + 2);
+    const m = H.autoMapHeaders(g[0]);
+    assert.strictEqual(g[1][m.registration_no], "123"); assert.strictEqual(g[1][m.name_en], "A, B"); assert.strictEqual(g[1][m.mobile], "0123");
+    assert.ok(Object.values(m).every((i) => i < g[0].length - 2));                                           // the two extra columns are ignored on re-upload
+    assert.strictEqual(g[1][g[0].length - 1], "5");
+  }
+
+  // wiring: menu = routes, the import entry follows the submissions entry, the script is loaded, SheetJS only lazily
+  const adminSrc = fs.readFileSync(path.join(__dirname, "admin", "admin.js"), "utf8");
+  const nav = Array.from(adminSrc.matchAll(/\["([a-z]+)", "[^"]+"\]/g)).map((m) => m[1]);
+  assert.deepStrictEqual(nav, H.ROUTES);
+  assert.strictEqual(H.ROUTES.indexOf("import"), H.ROUTES.indexOf("submissions") + 1);
+  assert.deepStrictEqual(H.parseRoute("#/import"), { name: "import", arg: "" });
+  const html = fs.readFileSync(path.join(__dirname, "admin", "index.html"), "utf8");
+  assert.ok(html.indexOf('src="views-import.js"') > html.indexOf('src="views-other.js"') && html.indexOf('src="views-import.js"') < html.indexOf('src="admin.js"'));
+  assert.ok(!/xlsx/i.test(html.replace(/views-import\.js/g, "")));                                            // SheetJS is not loaded on every page
+  const impSrc = fs.readFileSync(path.join(__dirname, "admin", "views-import.js"), "utf8");
+  assert.ok(/xlsx@0\.18\.5\/dist\/xlsx\.full\.min\.js/.test(impSrc) && /sha384-[A-Za-z0-9+\/]{64}/.test(impSrc) && /cdn\.jsdelivr\.net\/npm\//.test(impSrc));
+  assert.ok(!/innerHTML|insertAdjacentHTML|document\.write|console\.|service_role|site-public/.test(impSrc));      // no raw HTML, no logging of student data, no public bucket
+  assert.ok(/V\["import"\]/.test(impSrc));
+}
+console.log("student import OK");
